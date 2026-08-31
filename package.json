@@ -1,0 +1,32 @@
+{
+  "name": "local-for-vocal-v2",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Local For Vocal v2 - 100% Free, Local-First Neighborhood Discovery & Marketplace",
+  "scripts": {
+    "dev": "concurrently \"npm run server\" \"npm run client\"",
+    "server": "nodemon server/src/server.js",
+    "client": "vite",
+    "build": "vite build",
+    "start": "node server/src/server.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "better-sqlite3": "^11.8.1",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "jsonwebtoken": "^9.0.2",
+    "leaflet": "^1.9.4",
+    "multer": "^1.4.5-lts.1",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "concurrently": "^9.1.2",
+    "nodemon": "^3.1.9",
+    "vite": "^6.1.0"
+  }
+}
