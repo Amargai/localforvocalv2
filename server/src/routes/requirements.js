@@ -4,6 +4,7 @@ const { db, safeJsonParse } = require('../config/db');
 const { calculateDistanceKm } = require('../utils/geo');
 const { requireAuth } = require('../middleware/auth');
 const { unmaskId } = require('../utils/crypto-id');
+const { sendLeadAlertEmail, sendQuoteAlertEmail } = require('../services/emailService');
 
 function getShopForUser(user, shopId = null) {
   if (!user) return null;
@@ -184,10 +185,23 @@ router.post('/', requireAuth, (req, res) => {
 
     // Verify target shop existence if specified
     if (cleanTargetShopId) {
-      const shopRow = db.prepare('SELECT id, name, category, phone, area, city FROM shops WHERE id = ?').get(cleanTargetShopId);
+      const shopRow = db.prepare('SELECT id, owner_id, name, category, phone, area, city FROM shops WHERE id = ?').get(cleanTargetShopId);
       if (shopRow) {
         cleanTargetShopName = shopRow.name;
         console.log(`📩 [DIRECT INQUIRY ALERT] New requirement "${title.trim()}" posted directly to ${shopRow.name} (${cleanTargetShopId}) by ${req.user.name}`);
+
+        // Dispatch email alert to shop owner
+        const owner = db.prepare('SELECT email FROM users WHERE id = ?').get(shopRow.owner_id);
+        if (owner && owner.email) {
+          sendLeadAlertEmail(owner.email, shopRow.name, {
+            title: title.trim(),
+            description: description ? description.trim() : '',
+            userName: req.user.name,
+            urgency,
+            budget,
+            phone: cleanPhone
+          }).catch(err => console.error('Lead email dispatch error:', err));
+        }
       } else {
         // If the targeted shop id does not exist, fallback to clean null
         cleanTargetShopId = null;
@@ -315,6 +329,15 @@ router.post('/:id/respond', requireAuth, (req, res) => {
       new Date().toISOString(),
       req.params.id
     );
+
+    // Dispatch email alert to customer if they have an email address
+    const customer = db.prepare('SELECT email FROM users WHERE id = ?').get(reqItem.customer_id);
+    if (customer && customer.email) {
+      sendQuoteAlertEmail(customer.email, reqItem.customer_name, shop ? shop.name : 'Local Store', {
+        price: req.body.price || responseObj.price || 'Quoted',
+        notes: message
+      }).catch(err => console.error('Quote email dispatch error:', err));
+    }
 
     return res.json({ 
       message: existingIndex >= 0 ? 'Your response has been updated!' : 'Response sent to customer!',

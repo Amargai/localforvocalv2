@@ -6,6 +6,7 @@ const { db } = require('../config/db');
 const { jwtSecret, nodeEnv } = require('../config/env');
 const { requireAuth } = require('../middleware/auth');
 const { sendRealSMS } = require('../services/smsService');
+const { sendOtpEmail, sendWelcomeEmail } = require('../services/emailService');
 const { cleanPhone, isValidPhone, isValidEmail } = require('../utils/validation');
 
 // In-memory store for simulated local OTPs (zero cost, zero external API needed)
@@ -168,7 +169,7 @@ router.post('/send-otp', async (req, res) => {
       return res.status(400).json({ message: 'Please enter a valid 10-digit mobile number' });
     }
 
-    const existingUser = db.prepare('SELECT id, name, account_type FROM users WHERE phone = ?').get(cleanPhone);
+    const existingUser = db.prepare('SELECT id, name, email, account_type FROM users WHERE phone = ?').get(cleanPhone);
 
     // 1. Strict Login Check: User MUST be registered already
     if (purpose === 'login' && !existingUser) {
@@ -197,15 +198,26 @@ router.post('/send-otp', async (req, res) => {
       attempts: 0 
     });
 
-    // Send real SMS via configured gateway (Fast2SMS / 2Factor / Twilio) or local fallback
+    // 1. Send real SMS via configured gateway (Fast2SMS / 2Factor / Twilio) or local fallback
     const smsResult = await sendRealSMS(cleanPhone, code);
+
+    // 2. Send real Email via Nodemailer (Gmail / Custom SMTP) if email is associated
+    let emailResult = null;
+    const recipientEmail = (existingUser && existingUser.email) || (req.body && req.body.email);
+    if (recipientEmail && typeof recipientEmail === 'string' && recipientEmail.includes('@')) {
+      emailResult = await sendOtpEmail(recipientEmail.trim(), code, purpose, existingUser ? existingUser.name : 'Neighbor');
+    }
+
+    const destinations = [`+91-${cleanPhone}`];
+    if (emailResult && emailResult.success) {
+      destinations.push(recipientEmail.trim());
+    }
 
     return res.json({
       success: true,
-      message: smsResult.provider !== 'local' 
-        ? `OTP sent to your mobile (+91-${cleanPhone}) via ${smsResult.provider}!`
-        : `6-digit OTP code sent to +91-${cleanPhone}!`,
-      provider: smsResult.provider,
+      message: `6-digit OTP sent to ${destinations.join(' and ')}!`,
+      smsProvider: smsResult.provider,
+      emailProvider: emailResult ? emailResult.provider : null,
       purpose,
       existingAccount: existingUser ? { name: existingUser.name, role: existingUser.account_type } : null,
       devOtp: (nodeEnv !== 'production' && smsResult.simulated) ? code : undefined
@@ -312,6 +324,9 @@ router.post('/register', (req, res) => {
     `).run(id, name.trim(), cleanEmail, cleanPhone, passwordHash, accountType, area || null, city || null, now, now);
 
     const user = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
+    if (cleanEmail) {
+      sendWelcomeEmail(cleanEmail, name.trim(), accountType).catch(err => console.error('Welcome email dispatch error:', err));
+    }
     return sendSession(res, user);
   } catch (err) {
     console.error('Register error:', err);
