@@ -72,17 +72,9 @@ async function sendRealSMS(phone, otpCode) {
   return { success: true, provider: 'local', simulated: true };
 }
 
-// Fast2SMS API integration (Quick SMS route 'q' delivers immediately)
-function sendViaFast2SMS(apiKey, phone, otp) {
+function callFast2SmsRaw(apiKey, payload) {
   return new Promise((resolve, reject) => {
-    const postData = JSON.stringify({
-      route: 'q',
-      message: `Your LocalForVocal verification code is ${otp}. Valid for 5 minutes. Do not share it with anyone.`,
-      language: 'english',
-      flash: 0,
-      numbers: phone
-    });
-
+    const postData = JSON.stringify(payload);
     const options = {
       hostname: 'www.fast2sms.com',
       port: 443,
@@ -104,7 +96,7 @@ function sendViaFast2SMS(apiKey, phone, otp) {
           if (json.return === true || res.statusCode === 200) {
             resolve(json);
           } else {
-            reject(new Error(Array.isArray(json.message) ? json.message.join(', ') : (json.message || 'Fast2SMS delivery error')));
+            reject(new Error(Array.isArray(json.message) ? json.message.join(', ') : (json.message || 'Fast2SMS error')));
           }
         } catch (e) {
           resolve(raw);
@@ -115,6 +107,35 @@ function sendViaFast2SMS(apiKey, phone, otp) {
     req.on('error', reject);
     req.write(postData);
     req.end();
+  });
+}
+
+// Fast2SMS API integration:
+// Automatically tries dedicated 20-paise OTP route (~₹0.20) first;
+// If website verification is pending on Fast2SMS, seamlessly uses Quick SMS route 'q'.
+async function sendViaFast2SMS(apiKey, phone, otp) {
+  // 1. Try cheap dedicated OTP route (~20 paise per SMS)
+  try {
+    const otpResult = await callFast2SmsRaw(apiKey, {
+      route: 'otp',
+      variables_values: otp,
+      numbers: phone
+    });
+    if (otpResult && otpResult.return === true) {
+      console.log(`💰 [Fast2SMS] Delivered via dedicated OTP route (~₹0.20 per SMS)`);
+      return otpResult;
+    }
+  } catch (err) {
+    // Falls back seamlessly if site verification is pending on Fast2SMS
+  }
+
+  // 2. Fallback to Quick SMS route 'q'
+  return await callFast2SmsRaw(apiKey, {
+    route: 'q',
+    message: `Your LocalForVocal verification code is ${otp}. Valid for 5 minutes. Do not share it with anyone.`,
+    language: 'english',
+    flash: 0,
+    numbers: phone
   });
 }
 

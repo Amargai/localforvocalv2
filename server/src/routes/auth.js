@@ -189,12 +189,22 @@ router.post('/send-otp', async (req, res) => {
       });
     }
     
+    // Anti-Spam Wallet Protection: Enforce 60-second cooldown per phone number
+    const existingOtp = localOtpStore.get(cleanPhone);
+    if (existingOtp && existingOtp.lastSentAt && (Date.now() - existingOtp.lastSentAt < 60000)) {
+      const waitSec = Math.ceil((60000 - (Date.now() - existingOtp.lastSentAt)) / 1000);
+      return res.status(429).json({
+        message: `Please wait ${waitSec} seconds before requesting a new OTP.`
+      });
+    }
+
     // Generate secure 6-digit random code
     const code = crypto.randomInt(100000, 999999).toString();
     localOtpStore.set(cleanPhone, { 
       code,
       purpose,
       expiresAt: Date.now() + 5 * 60 * 1000, // 5 minutes validity
+      lastSentAt: Date.now(),
       attempts: 0 
     });
 
