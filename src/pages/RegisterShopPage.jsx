@@ -1,11 +1,15 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { api } from '../utils/api';
 import { useAuth } from '../context/AuthContext';
-import { CATEGORIES, SUB_CATEGORIES, SUGGESTED_TAGS } from '../utils/constants';
+import { useCategories } from '../context/CategoryContext';
 import { LocationIcon, PlusIcon, CheckIcon } from '../components/Icons';
+import { reverseGeocode, setUserSavedLocation, getUserSavedLocation, getCurrentBrowserPosition } from '../utils/geo';
+import { compressImage } from '../utils/image';
+import { cleanPhone, isValidPhone, cleanPin, isValidPin } from '../utils/validation';
 
 export function RegisterShopPage({ setActivePage }) {
   const { user, refreshSession, openAuthModal } = useAuth();
+  const { rawCategories, subCategoriesMap, suggestedTagsMap } = useCategories();
 
   const [step, setStep] = useState(1);
   const [submitting, setSubmitting] = useState(false);
@@ -18,9 +22,15 @@ export function RegisterShopPage({ setActivePage }) {
   const [phone, setPhone] = useState(user?.phone || '');
   const [whatsapp, setWhatsapp] = useState(user?.phone || '');
   const [address, setAddress] = useState('');
-  const [area, setArea] = useState('Andheri West');
-  const [city, setCity] = useState('Mumbai');
-  const [pin, setPin] = useState('400058');
+  const [area, setArea] = useState(() => {
+    const saved = getUserSavedLocation();
+    return saved?.area && saved?.area !== 'Current Location' ? saved.area : '';
+  });
+  const [city, setCity] = useState(() => {
+    const saved = getUserSavedLocation();
+    return saved?.city && saved?.city !== 'Near You' ? saved.city : '';
+  });
+  const [pin, setPin] = useState('');
   const [tags, setTags] = useState([]);
   const [customTagInput, setCustomTagInput] = useState('');
   const [openTime, setOpenTime] = useState('09:00');
@@ -29,9 +39,17 @@ export function RegisterShopPage({ setActivePage }) {
   const [imageUrl, setImageUrl] = useState('https://images.unsplash.com/photo-1578916171728-46686eac8d58?w=600&auto=format&fit=crop&q=80');
 
   // Location Coordinates
-  const [lat, setLat] = useState(19.1136);
-  const [lng, setLng] = useState(72.8697);
+  const [lat, setLat] = useState(() => {
+    const saved = getUserSavedLocation();
+    return saved?.lat || 19.1136;
+  });
+  const [lng, setLng] = useState(() => {
+    const saved = getUserSavedLocation();
+    return saved?.lng || 72.8697;
+  });
   const [locDetected, setLocDetected] = useState(false);
+  const [detectingGps, setDetectingGps] = useState(false);
+  const [gpsStatusMsg, setGpsStatusMsg] = useState('');
 
   const [uploadingImg, setUploadingImg] = useState(false);
 
@@ -39,8 +57,9 @@ export function RegisterShopPage({ setActivePage }) {
     if (!file) return;
     try {
       setUploadingImg(true);
+      const optimizedFile = await compressImage(file);
       const formData = new FormData();
-      formData.append('image', file);
+      formData.append('image', optimizedFile);
       const res = await api('/uploads', {
         method: 'POST',
         body: formData
@@ -53,9 +72,22 @@ export function RegisterShopPage({ setActivePage }) {
     }
   }
 
+  function handleToggleTag(tag) {
+    if (!tag) return;
+    const cleanTag = tag.trim();
+    if (!cleanTag) return;
+    if (tags.includes(cleanTag)) {
+      setTags(tags.filter(t => t !== cleanTag));
+    } else {
+      setTags([...tags, cleanTag]);
+    }
+  }
+
   function handleAddTag(tag) {
-    if (tag && !tags.includes(tag)) {
-      setTags([...tags, tag]);
+    if (!tag) return;
+    const cleanTag = tag.trim();
+    if (cleanTag && !tags.includes(cleanTag)) {
+      setTags([...tags, cleanTag]);
     }
   }
 
@@ -63,13 +95,37 @@ export function RegisterShopPage({ setActivePage }) {
     setTags(tags.filter(t => t !== tag));
   }
 
-  function detectGPS() {
-    if ('geolocation' in navigator) {
-      navigator.geolocation.getCurrentPosition((pos) => {
-        setLat(pos.coords.latitude);
-        setLng(pos.coords.longitude);
-        setLocDetected(true);
+  async function detectGPS() {
+    try {
+      setDetectingGps(true);
+      setGpsStatusMsg('Fetching exact GPS...');
+      const pos = await getCurrentBrowserPosition();
+      const newLat = Number(pos.lat);
+      const newLng = Number(pos.lng);
+      setLat(newLat);
+      setLng(newLng);
+      setLocDetected(true);
+      setGpsStatusMsg(`Lat: ${newLat.toFixed(4)}, Lng: ${newLng.toFixed(4)}`);
+
+      // Reverse geocode to auto-populate area/city/pin
+      const geo = await reverseGeocode(newLat, newLng);
+      if (geo) {
+        if (geo.area && (!area || area === 'Andheri West')) setArea(geo.area);
+        if (geo.city && (!city || city === 'Mumbai')) setCity(geo.city);
+        if (geo.pin && !pin) setPin(geo.pin);
+      }
+
+      setUserSavedLocation({
+        lat: newLat,
+        lng: newLng,
+        area: geo?.area || area || 'Current Location',
+        city: geo?.city || city || 'Near You',
+        pin: geo?.pin || pin || ''
       });
+    } catch (err) {
+      setGpsStatusMsg('GPS permission denied or unavailable');
+    } finally {
+      setDetectingGps(false);
     }
   }
 
@@ -82,6 +138,11 @@ export function RegisterShopPage({ setActivePage }) {
 
     try {
       setSubmitting(true);
+      const cleanLat = Number(lat) || 19.1136;
+      const cleanLng = Number(lng) || 72.8697;
+      const cleanArea = area.trim() || 'Neighborhood';
+      const cleanCity = city.trim() || 'Your City';
+
       await api('/shops', {
         method: 'POST',
         body: JSON.stringify({
@@ -92,15 +153,24 @@ export function RegisterShopPage({ setActivePage }) {
           phone: phone.trim(),
           whatsapp: whatsapp.trim() || phone.trim(),
           address: address.trim(),
-          area: area.trim(),
-          city: city.trim(),
+          area: cleanArea,
+          city: cleanCity,
           pin: pin.trim(),
           tags,
-          latitude: lat,
-          longitude: lng,
+          latitude: cleanLat,
+          longitude: cleanLng,
           businessHours: { open: openTime, close: closeTime, days: openDays },
           images: [imageUrl]
         })
+      });
+
+      // Save user location so Explore and other pages center on the newly created shop
+      setUserSavedLocation({
+        lat: cleanLat,
+        lng: cleanLng,
+        area: cleanArea,
+        city: cleanCity,
+        pin: pin.trim()
       });
 
       await refreshSession();
@@ -166,7 +236,7 @@ export function RegisterShopPage({ setActivePage }) {
                   value={category}
                   onChange={(e) => { setCategory(e.target.value); setSubCategory(''); }}
                 >
-                  {CATEGORIES.slice(1).map((c) => (
+                  {rawCategories.map((c) => (
                     <option key={c.id} value={c.id}>
                       {c.icon} {c.name}
                     </option>
@@ -174,7 +244,7 @@ export function RegisterShopPage({ setActivePage }) {
                 </select>
               </div>
 
-              {SUB_CATEGORIES[category] && (
+              {subCategoriesMap[category] && subCategoriesMap[category].length > 0 && (
                 <div className="form-group">
                   <label className="form-label">Sub-Category / Speciality</label>
                   <select
@@ -183,7 +253,7 @@ export function RegisterShopPage({ setActivePage }) {
                     onChange={(e) => setSubCategory(e.target.value)}
                   >
                     <option value="">Select sub-category...</option>
-                    {SUB_CATEGORIES[category].map((sub, idx) => (
+                    {subCategoriesMap[category].map((sub, idx) => (
                       <option key={idx} value={sub}>{sub}</option>
                     ))}
                   </select>
@@ -223,25 +293,47 @@ export function RegisterShopPage({ setActivePage }) {
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
                 <div className="form-group">
-                  <label className="form-label">Phone Number *</label>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                    <label className="form-label" style={{ margin: 0 }}>Phone Number *</label>
+                    {phone.length > 0 && (
+                      <span style={{ fontSize: '0.72rem', fontWeight: 700, color: isValidPhone(phone) ? '#22c55e' : '#f59e0b' }}>
+                        {isValidPhone(phone) ? '✓ 10 digits' : `${phone.length}/10 digits`}
+                      </span>
+                    )}
+                  </div>
                   <input
                     type="tel"
                     className="form-input"
-                    placeholder="10-digit calling number"
+                    placeholder="e.g. 9820011111"
                     value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
+                    onChange={(e) => setPhone(cleanPhone(e.target.value))}
+                    maxLength={10}
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    style={{ borderColor: phone.length === 10 ? (isValidPhone(phone) ? '#22c55e' : '#ef4444') : undefined }}
                     required
                   />
                 </div>
 
                 <div className="form-group">
-                  <label className="form-label">WhatsApp Number (For Direct Chat)</label>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                    <label className="form-label" style={{ margin: 0 }}>WhatsApp Number</label>
+                    {whatsapp.length > 0 && (
+                      <span style={{ fontSize: '0.72rem', fontWeight: 700, color: isValidPhone(whatsapp) ? '#22c55e' : '#f59e0b' }}>
+                        {isValidPhone(whatsapp) ? '✓ 10 digits' : `${whatsapp.length}/10 digits`}
+                      </span>
+                    )}
+                  </div>
                   <input
                     type="tel"
                     className="form-input"
                     placeholder="10-digit WhatsApp number"
                     value={whatsapp}
-                    onChange={(e) => setWhatsapp(e.target.value)}
+                    onChange={(e) => setWhatsapp(cleanPhone(e.target.value))}
+                    maxLength={10}
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    style={{ borderColor: whatsapp.length === 10 ? (isValidPhone(whatsapp) ? '#22c55e' : '#ef4444') : undefined }}
                   />
                 </div>
               </div>
@@ -284,28 +376,79 @@ export function RegisterShopPage({ setActivePage }) {
                 </div>
 
                 <div className="form-group">
-                  <label className="form-label">Pin Code</label>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                    <label className="form-label" style={{ margin: 0 }}>Pin Code</label>
+                    {pin.length > 0 && (
+                      <span style={{ fontSize: '0.72rem', fontWeight: 700, color: isValidPin(pin) ? '#22c55e' : '#f59e0b' }}>
+                        {isValidPin(pin) ? '✓ 6 digits' : `${pin.length}/6`}
+                      </span>
+                    )}
+                  </div>
                   <input
                     type="text"
                     className="form-input"
                     placeholder="e.g. 400058"
                     value={pin}
-                    onChange={(e) => setPin(e.target.value)}
+                    onChange={(e) => setPin(cleanPin(e.target.value))}
+                    maxLength={6}
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    style={{ borderColor: pin.length === 6 ? (isValidPin(pin) ? '#22c55e' : '#ef4444') : undefined }}
                   />
                 </div>
               </div>
 
-              <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 'var(--radius-md)', padding: '14px', marginBottom: '20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <div>
-                  <div style={{ fontWeight: 700, fontSize: '0.9rem', color: '#166534' }}>GPS Coordinates for Nearby Radius Search</div>
-                  <div style={{ fontSize: '0.8rem', color: '#15803d' }}>
-                    {locDetected ? `Lat: ${lat.toFixed(4)}, Lng: ${lng.toFixed(4)}` : 'Using standard neighborhood center'}
+              <div style={{ background: 'var(--bg-input)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', padding: '16px', marginBottom: '20px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: '0.92rem', color: 'var(--text-heading)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span>📍 Exact GPS Coordinates</span>
+                      <span className="badge badge-green" style={{ fontSize: '0.68rem', padding: '1px 6px' }}>Radius Search</span>
+                    </div>
+                    <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '2px' }}>
+                      {gpsStatusMsg || (locDetected ? `Lat: ${lat.toFixed(4)}, Lng: ${lng.toFixed(4)}` : 'Auto-detect your shop location or enter below')}
+                    </div>
+                  </div>
+                  <button 
+                    type="button" 
+                    className="btn btn-secondary" 
+                    onClick={detectGPS} 
+                    disabled={detectingGps}
+                    style={{ fontSize: '0.84rem', padding: '6px 12px', display: 'flex', alignItems: 'center', gap: '6px' }}
+                  >
+                    <LocationIcon className="w-4 h-4" />
+                    {detectingGps ? 'Locating...' : locDetected ? 'Re-Detect GPS' : 'Detect GPS'}
+                  </button>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginTop: '10px', paddingTop: '10px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+                  <div>
+                    <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>Latitude</label>
+                    <input
+                      type="number"
+                      step="any"
+                      className="form-input"
+                      style={{ padding: '6px 10px', fontSize: '0.85rem' }}
+                      value={lat}
+                      onChange={(e) => setLat(parseFloat(e.target.value) || 0)}
+                      placeholder="e.g. 17.3715"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>Longitude</label>
+                    <input
+                      type="number"
+                      step="any"
+                      className="form-input"
+                      style={{ padding: '6px 10px', fontSize: '0.85rem' }}
+                      value={lng}
+                      onChange={(e) => setLng(parseFloat(e.target.value) || 0)}
+                      placeholder="e.g. 73.9008"
+                      required
+                    />
                   </div>
                 </div>
-                <button type="button" className="btn btn-secondary" onClick={detectGPS} style={{ fontSize: '0.85rem' }}>
-                  <LocationIcon className="w-4 h-4" />
-                  {locDetected ? 'GPS Updated' : 'Detect GPS'}
-                </button>
               </div>
 
               <div style={{ display: 'flex', gap: '12px' }}>
@@ -317,8 +460,27 @@ export function RegisterShopPage({ setActivePage }) {
                   className="btn btn-primary"
                   style={{ flex: 2 }}
                   onClick={() => {
-                    if (!phone || !address || !area || !city) alert('Please fill phone, address, area, and city');
-                    else setStep(3);
+                    if (!phone || !isValidPhone(phone)) {
+                      alert('Please enter a valid 10-digit calling phone number starting with 6, 7, 8, or 9');
+                      return;
+                    }
+                    if (whatsapp && !isValidPhone(whatsapp)) {
+                      alert('Please enter a valid 10-digit WhatsApp number starting with 6, 7, 8, or 9');
+                      return;
+                    }
+                    if (pin && !isValidPin(pin)) {
+                      alert('Please enter a valid 6-digit postal PIN code');
+                      return;
+                    }
+                    if (!address.trim() || address.trim().length < 5) {
+                      alert('Please provide a complete shop address (minimum 5 characters)');
+                      return;
+                    }
+                    if (!area.trim() || !city.trim()) {
+                      alert('Please fill area and city');
+                      return;
+                    }
+                    setStep(3);
                   }}
                 >
                   Continue to Timings & Tags →
@@ -349,26 +511,83 @@ export function RegisterShopPage({ setActivePage }) {
 
               {/* Suggested Tags */}
               <div className="form-group">
-                <label className="form-label">Suggested Product/Service Keywords (Click to add)</label>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '12px' }}>
-                  {(SUGGESTED_TAGS[category] || []).map((tag, idx) => (
-                    <button
-                      type="button"
-                      key={idx}
-                      onClick={() => handleAddTag(tag)}
-                      className={`badge ${tags.includes(tag) ? 'badge-green' : 'badge-gray'}`}
-                      style={{ padding: '6px 12px', fontSize: '0.8rem', cursor: 'pointer' }}
-                    >
-                      {tags.includes(tag) ? '✓ ' : '+ '} {tag}
-                    </button>
-                  ))}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                  <label className="form-label" style={{ margin: 0 }}>Service & Product Keywords (Click to toggle on/off)</label>
+                  <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>{tags.length} selected</span>
                 </div>
+
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '12px' }}>
+                  {(suggestedTagsMap[category] || []).map((tag, idx) => {
+                    const isSelected = tags.includes(tag);
+                    return (
+                      <button
+                        type="button"
+                        key={idx}
+                        onClick={() => handleToggleTag(tag)}
+                        className={`badge ${isSelected ? 'badge-green' : 'badge-gray'}`}
+                        style={{
+                          padding: '6px 12px',
+                          fontSize: '0.82rem',
+                          cursor: 'pointer',
+                          border: isSelected ? '1px solid #22c55e' : '1px solid var(--border)',
+                          transition: 'all 0.15s ease'
+                        }}
+                        title={isSelected ? 'Click to deselect' : 'Click to select'}
+                      >
+                        {isSelected ? '✓ ' : '+ '} {tag}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Selected keywords display */}
+                {tags.length > 0 && (
+                  <div style={{
+                    background: 'rgba(34, 197, 94, 0.08)',
+                    border: '1px solid rgba(34, 197, 94, 0.25)',
+                    borderRadius: 'var(--radius-md)',
+                    padding: '10px 12px',
+                    marginBottom: '12px'
+                  }}>
+                    <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#4ade80', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                      Active Keywords on Shop Profile:
+                    </div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                      {tags.map((tag, idx) => (
+                        <span
+                          key={idx}
+                          className="badge badge-green"
+                          style={{ padding: '4px 8px', fontSize: '0.8rem', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                        >
+                          <span>{tag}</span>
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); handleRemoveTag(tag); }}
+                            style={{
+                              background: 'transparent',
+                              border: 'none',
+                              color: '#15803d',
+                              cursor: 'pointer',
+                              fontWeight: 900,
+                              padding: 0,
+                              lineHeight: 1,
+                              fontSize: '0.85rem'
+                            }}
+                            title={`Remove ${tag}`}
+                          >
+                            ✕
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 <div style={{ display: 'flex', gap: '8px' }}>
                   <input
                     type="text"
                     className="form-input"
-                    placeholder="Add custom keyword tag..."
+                    placeholder="Add custom keyword tag (e.g. 24hr Home Delivery)..."
                     value={customTagInput}
                     onChange={(e) => setCustomTagInput(e.target.value)}
                     onKeyDown={(e) => {
@@ -391,7 +610,7 @@ export function RegisterShopPage({ setActivePage }) {
                       }
                     }}
                   >
-                    Add
+                    + Add
                   </button>
                 </div>
               </div>

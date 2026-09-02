@@ -1,0 +1,20 @@
+{
+  "name": "LocalForVocal — Neighborhood Marketplace",
+  "short_name": "Local4Vocal",
+  "description": "Hyper-Local Neighborhood Discovery & Marketplace. Zero cloud bills, 100% free.",
+  "start_url": "/#home",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#080911",
+  "theme_color": "#10b981",
+  "categories": ["shopping", "lifestyle", "business"],
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

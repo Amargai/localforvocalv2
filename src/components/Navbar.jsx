@@ -1,11 +1,44 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { PlusIcon, UserIcon, ShieldCheckIcon, SparklesIcon } from './Icons';
+import { 
+  PlusIcon, 
+  UserIcon, 
+  ShieldCheckIcon, 
+  SparklesIcon, 
+  ChevronDownIcon, 
+  ChevronRightIcon, 
+  LogoutIcon, 
+  StoreIcon, 
+  DocumentTextIcon 
+} from './Icons';
 
 export function Navbar({ activePage, setActivePage }) {
-  const { user, openAuthModal, logout } = useAuth();
+  const { user, shop, openAuthModal, logout, switchMode } = useAuth();
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const dropdownRef = useRef(null);
+
+  // Close dropdown on outside click or ESC key
+  useEffect(() => {
+    function handleClickOutside(event) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+        setDropdownOpen(false);
+      }
+    }
+    function handleKeyDown(e) {
+      if (e.key === 'Escape') {
+        setDropdownOpen(false);
+      }
+    }
+    if (dropdownOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+      document.addEventListener('keydown', handleKeyDown);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [dropdownOpen]);
 
   return (
     <div className="navbar-wrapper">
@@ -49,7 +82,7 @@ export function Navbar({ activePage, setActivePage }) {
               Plans
             </button>
 
-            {user?.accountType === 'shop_owner' && (
+            {(user?.accountType === 'shop_owner' || shop) && (
               <button
                 className={`nav-link ${activePage === 'dashboard' ? 'active' : ''}`}
                 onClick={() => setActivePage('dashboard')}
@@ -83,71 +116,272 @@ export function Navbar({ activePage, setActivePage }) {
             </button>
 
             {user ? (
-              <div style={{ position: 'relative' }}>
+              <div style={{ position: 'relative' }} ref={dropdownRef}>
+                {/* Modern Luxury Profile Trigger Button */}
                 <button
-                  className="btn btn-primary"
-                  style={{ fontSize: '0.85rem', padding: '8px 12px' }}
+                  className={`profile-trigger-btn ${dropdownOpen ? 'active' : ''}`}
                   onClick={() => setDropdownOpen(!dropdownOpen)}
+                  aria-expanded={dropdownOpen}
+                  aria-haspopup="true"
+                  title="Account settings & profile"
                 >
-                  <UserIcon className="w-4 h-4" />
-                  <span>{user.name.split(' ')[0]}</span>
-                  <span className={`badge ${user.accountType === 'admin' ? 'badge-amber' : user.accountType === 'shop_owner' ? 'badge-blue' : 'badge-green'}`} style={{ marginLeft: 2 }}>
-                    {user.accountType === 'shop_owner' ? 'Owner' : user.accountType}
-                  </span>
+                  <div className="profile-trigger-avatar">
+                    {user?.name ? user.name.charAt(0).toUpperCase() : 'U'}
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', lineHeight: 1.15 }}>
+                    <span style={{ fontSize: '0.86rem', fontWeight: 700, color: 'var(--text-heading)' }}>
+                      {(user?.name || 'User').split(' ')[0]}
+                    </span>
+                    <span style={{
+                      fontSize: '0.66rem',
+                      fontWeight: 600,
+                      letterSpacing: '0.02em',
+                      color: user?.accountType === 'admin' ? '#fbbf24' : user?.accountType === 'shop_owner' ? '#60a5fa' : '#4ade80'
+                    }}>
+                      {user?.accountType === 'admin' ? '🛡️ Admin' : user?.accountType === 'shop_owner' ? '🏪 Owner' : '🌿 Shopper'}
+                    </span>
+                  </div>
+                  <ChevronDownIcon className={`profile-trigger-chevron ${dropdownOpen ? 'rotated' : ''}`} size={14} />
                 </button>
 
+                {/* Ultra Sleek Floating Profile Dropdown Popup */}
                 {dropdownOpen && (
-                  <div style={{
-                    position: 'absolute',
-                    top: '110%',
-                    right: 0,
-                    background: 'var(--bg-card)',
-                    border: '1px solid var(--border)',
-                    borderRadius: 'var(--radius-md)',
-                    boxShadow: 'var(--shadow-xl)',
-                    minWidth: '220px',
-                    padding: '8px',
-                    zIndex: 100,
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '4px'
-                  }}>
-                    <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--border)', fontSize: '0.85rem' }}>
-                      <div style={{ fontWeight: 700, color: 'var(--text-heading)' }}>{user.name}</div>
-                      <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>{user.phone || user.email}</div>
+                  <div className="profile-dropdown-popup" role="menu">
+                    {/* Header Card */}
+                    <div className="profile-popup-header">
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                        <div className="profile-header-avatar-large">
+                          {user?.name ? user.name.charAt(0).toUpperCase() : 'U'}
+                          <span className="profile-header-online-dot" title="Active Session" />
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                            <span style={{
+                              fontWeight: 800,
+                              fontSize: '0.94rem',
+                              color: 'var(--text-heading)',
+                              whiteSpace: 'nowrap',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              maxWidth: '145px'
+                            }}>
+                              {user.name}
+                            </span>
+                            <span className={`badge ${
+                              user.accountType === 'admin' 
+                                ? 'badge-amber' 
+                                : user.accountType === 'shop_owner' 
+                                ? 'badge-blue' 
+                                : 'badge-green'
+                            }`} style={{ fontSize: '0.64rem', padding: '1px 6px' }}>
+                              {user.accountType === 'shop_owner' ? 'Shop Owner' : user.accountType === 'admin' ? 'Admin' : 'Shopper'}
+                            </span>
+                          </div>
+                          <div style={{
+                            color: 'var(--text-muted)',
+                            fontSize: '0.74rem',
+                            marginTop: '2px',
+                            whiteSpace: 'nowrap',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis'
+                          }}>
+                            {user.email || user.phone || 'Local Community Member'}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Associated Shop Banner (if user owns a shop) */}
+                      {shop && (
+                        <div style={{
+                          marginTop: '10px',
+                          padding: '7px 10px',
+                          background: 'rgba(59, 130, 246, 0.12)',
+                          border: '1px solid rgba(59, 130, 246, 0.25)',
+                          borderRadius: '8px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          fontSize: '0.78rem'
+                        }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#93c5fd', fontWeight: 600, minWidth: 0 }}>
+                            <span>🏪</span>
+                            <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '140px' }}>
+                              {shop.name}
+                            </span>
+                          </div>
+                          <button
+                            style={{ color: '#60a5fa', fontWeight: 700, fontSize: '0.72rem', background: 'transparent' }}
+                            onClick={() => { setActivePage('dashboard'); setDropdownOpen(false); }}
+                          >
+                            Dashboard →
+                          </button>
+                        </div>
+                      )}
                     </div>
 
-                    <button
-                      style={{ textAlign: 'left', padding: '8px 12px', borderRadius: '6px', fontSize: '0.88rem' }}
-                      onClick={() => { setActivePage('profile'); setDropdownOpen(false); }}
-                    >
-                      👤 My Profile & Demands
-                    </button>
-
-                    {user.accountType === 'shop_owner' && (
-                      <button
-                        style={{ textAlign: 'left', padding: '8px 12px', borderRadius: '6px', fontSize: '0.88rem' }}
-                        onClick={() => { setActivePage('dashboard'); setDropdownOpen(false); }}
-                      >
-                        🏪 Shop Owner Dashboard
-                      </button>
+                    {/* Single-User Mode Switcher (If user owns a shop, toggle Rajesh between Shopper & Merchant mode) */}
+                    {shop ? (
+                      <div style={{ padding: '0 2px 4px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '3px' }}>
+                          <span className="profile-menu-section-label" style={{ padding: '2px 6px' }}>Active Account View</span>
+                        </div>
+                        <div className="profile-demo-switch-bar">
+                          <button
+                            className={`profile-demo-role-btn ${user.accountType === 'customer' ? 'active role-customer' : ''}`}
+                            onClick={async () => {
+                              await switchMode('customer');
+                            }}
+                            title="Browse and post requirements as a Shopper"
+                          >
+                            🌿 Shopper Mode
+                          </button>
+                          <button
+                            className={`profile-demo-role-btn ${user.accountType === 'shop_owner' ? 'active role-owner' : ''}`}
+                            onClick={async () => {
+                              await switchMode('shop_owner');
+                            }}
+                            title="Manage catalogue, deals and inquiries as Shop Owner"
+                          >
+                            🏪 Merchant Mode
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div style={{
+                        margin: '4px 2px 6px',
+                        padding: '10px 12px',
+                        background: 'rgba(34, 197, 94, 0.08)',
+                        border: '1px solid rgba(34, 197, 94, 0.2)',
+                        borderRadius: '10px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: '8px'
+                      }}>
+                        <div style={{ display: 'flex', flexDirection: 'column' }}>
+                          <span style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-heading)' }}>🏪 Sell on Local4Vocal</span>
+                          <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>List your business & receive leads</span>
+                        </div>
+                        <button
+                          className="btn btn-primary"
+                          style={{ padding: '4px 10px', fontSize: '0.72rem', whiteSpace: 'nowrap' }}
+                          onClick={() => { setActivePage('register-shop'); setDropdownOpen(false); }}
+                        >
+                          + List Shop
+                        </button>
+                      </div>
                     )}
 
-                    {user.accountType === 'admin' && (
-                      <button
-                        style={{ textAlign: 'left', padding: '8px 12px', borderRadius: '6px', fontSize: '0.88rem' }}
-                        onClick={() => { setActivePage('admin'); setDropdownOpen(false); }}
-                      >
-                        🛡️ Admin Moderation
-                      </button>
-                    )}
+                    <div className="profile-popup-divider" />
 
-                    <button
-                      style={{ textAlign: 'left', padding: '8px 12px', borderRadius: '6px', fontSize: '0.88rem', color: '#ef4444', borderTop: '1px solid #f1f5f9' }}
-                      onClick={() => { logout(); setDropdownOpen(false); }}
-                    >
-                      🚪 Sign Out
-                    </button>
+                    {/* Navigation Menu List */}
+                    <div className="profile-menu-list">
+                      <button
+                        className="profile-menu-item"
+                        onClick={() => { setActivePage('profile'); setDropdownOpen(false); }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', minWidth: 0 }}>
+                          <div className="profile-item-icon-box green">
+                            <UserIcon size={16} />
+                          </div>
+                          <div className="profile-item-text">
+                            <span className="profile-item-title">My Profile & Demands</span>
+                            <span className="profile-item-subtitle">Manage inquiries & replies</span>
+                          </div>
+                        </div>
+                        <ChevronRightIcon className="profile-item-chevron" size={14} />
+                      </button>
+
+                      {(user.accountType === 'shop_owner' || shop) && (
+                        <button
+                          className="profile-menu-item"
+                          onClick={() => { setActivePage('dashboard'); setDropdownOpen(false); }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', minWidth: 0 }}>
+                            <div className="profile-item-icon-box blue">
+                              <StoreIcon size={16} />
+                            </div>
+                            <div className="profile-item-text">
+                              <span className="profile-item-title">Shop Dashboard</span>
+                              <span className="profile-item-subtitle">Catalog, deals & inquiries</span>
+                            </div>
+                          </div>
+                          <ChevronRightIcon className="profile-item-chevron" size={14} />
+                        </button>
+                      )}
+
+                      {user.accountType === 'admin' && (
+                        <button
+                          className="profile-menu-item"
+                          onClick={() => { setActivePage('admin'); setDropdownOpen(false); }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', minWidth: 0 }}>
+                            <div className="profile-item-icon-box amber">
+                              <ShieldCheckIcon size={16} />
+                            </div>
+                            <div className="profile-item-text">
+                              <span className="profile-item-title">Admin Moderation</span>
+                              <span className="profile-item-subtitle">Verify shops & audit logs</span>
+                            </div>
+                          </div>
+                          <ChevronRightIcon className="profile-item-chevron" size={14} />
+                        </button>
+                      )}
+
+                      <button
+                        className="profile-menu-item"
+                        onClick={() => { setActivePage('requirements'); setDropdownOpen(false); }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', minWidth: 0 }}>
+                          <div className="profile-item-icon-box green">
+                            <DocumentTextIcon size={16} />
+                          </div>
+                          <div className="profile-item-text">
+                            <span className="profile-item-title">Post New Demand</span>
+                            <span className="profile-item-subtitle">Get quotes from local shops</span>
+                          </div>
+                        </div>
+                        <ChevronRightIcon className="profile-item-chevron" size={14} />
+                      </button>
+
+                      <button
+                        className="profile-menu-item"
+                        onClick={() => { setActivePage('plans'); setDropdownOpen(false); }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', minWidth: 0 }}>
+                          <div className="profile-item-icon-box purple">
+                            <SparklesIcon size={16} />
+                          </div>
+                          <div className="profile-item-text">
+                            <span className="profile-item-title">
+                              Growth Plans
+                              <span className="badge badge-amber" style={{ fontSize: '0.6rem', padding: '0 5px', height: '16px' }}>Pro</span>
+                            </span>
+                            <span className="profile-item-subtitle">Boost business reach</span>
+                          </div>
+                        </div>
+                        <ChevronRightIcon className="profile-item-chevron" size={14} />
+                      </button>
+
+                      <div className="profile-popup-divider" />
+
+                      {/* Sign Out Button */}
+                      <button
+                        className="profile-menu-item profile-menu-danger"
+                        onClick={() => { logout(); setDropdownOpen(false); }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', minWidth: 0 }}>
+                          <div className="profile-item-icon-box red">
+                            <LogoutIcon size={16} />
+                          </div>
+                          <div className="profile-item-text">
+                            <span className="profile-item-title" style={{ color: '#f87171' }}>Sign Out</span>
+                            <span className="profile-item-subtitle">Log out of your session safely</span>
+                          </div>
+                        </div>
+                        <ChevronRightIcon className="profile-item-chevron" size={14} />
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>
@@ -204,47 +438,65 @@ export function Navbar({ activePage, setActivePage }) {
             boxShadow: '0 20px 40px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.05)',
             animation: 'slideUp 0.2s ease-out'
           }}>
-            {/* Mobile User Profile Pill */}
+            {/* Mobile User Profile Card */}
             {user ? (
               <div style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                padding: '12px 14px',
-                background: 'var(--bg-surface)',
+                background: 'linear-gradient(135deg, rgba(34, 197, 94, 0.1) 0%, rgba(19, 20, 36, 0.8) 100%)',
                 borderRadius: 'var(--radius-md)',
-                border: '1px solid var(--border)',
+                border: '1px solid rgba(34, 197, 94, 0.2)',
+                padding: '14px',
                 marginBottom: '8px'
               }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                  <div style={{
-                    width: '36px',
-                    height: '36px',
-                    borderRadius: '50%',
-                    background: 'var(--primary)',
-                    color: '#080911',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    fontWeight: 800,
-                    fontSize: '1rem'
-                  }}>
-                    {user.name ? user.name[0].toUpperCase() : 'U'}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <div style={{
+                      width: '38px',
+                      height: '38px',
+                      borderRadius: '50%',
+                      background: 'linear-gradient(135deg, #22c55e 0%, #059669 100%)',
+                      color: '#ffffff',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontWeight: 800,
+                      fontSize: '1rem',
+                      boxShadow: '0 2px 8px rgba(34, 197, 94, 0.35)'
+                    }}>
+                      {user.name ? user.name[0].toUpperCase() : 'U'}
+                    </div>
+                    <div>
+                      <div style={{ fontWeight: 700, fontSize: '0.94rem', color: 'var(--text-heading)' }}>{user.name}</div>
+                      <span className={`badge ${user.accountType === 'admin' ? 'badge-amber' : user.accountType === 'shop_owner' ? 'badge-blue' : 'badge-green'}`} style={{ fontSize: '0.68rem', padding: '1px 6px' }}>
+                        {user.accountType === 'shop_owner' ? 'Shop Owner' : user.accountType === 'admin' ? 'Admin' : 'Shopper'}
+                      </span>
+                    </div>
                   </div>
-                  <div>
-                    <div style={{ fontWeight: 700, fontSize: '0.92rem', color: 'var(--text-heading)' }}>{user.name}</div>
-                    <span className={`badge ${user.accountType === 'admin' ? 'badge-amber' : user.accountType === 'shop_owner' ? 'badge-blue' : 'badge-green'}`} style={{ fontSize: '0.68rem', padding: '1px 6px' }}>
-                      {user.accountType === 'shop_owner' ? 'Shop Owner' : user.accountType}
-                    </span>
-                  </div>
+
+                  <button
+                    style={{ fontSize: '0.82rem', color: 'var(--primary)', fontWeight: 600, background: 'rgba(34, 197, 94, 0.12)', padding: '6px 10px', borderRadius: '8px' }}
+                    onClick={() => { setActivePage('profile'); setMobileMenuOpen(false); }}
+                  >
+                    Profile →
+                  </button>
                 </div>
 
-                <button
-                  style={{ fontSize: '0.8rem', color: 'var(--text-muted)', background: 'transparent', padding: '4px 8px' }}
-                  onClick={() => { setActivePage('profile'); setMobileMenuOpen(false); }}
-                >
-                  Profile →
-                </button>
+                {/* Mobile Mode Switcher for Shop Owners */}
+                {shop && (
+                  <div className="profile-demo-switch-bar" style={{ margin: 0 }}>
+                    <button
+                      className={`profile-demo-role-btn ${user.accountType === 'customer' ? 'active role-customer' : ''}`}
+                      onClick={() => switchMode('customer')}
+                    >
+                      🌿 Shopper
+                    </button>
+                    <button
+                      className={`profile-demo-role-btn ${user.accountType === 'shop_owner' ? 'active role-owner' : ''}`}
+                      onClick={() => switchMode('shop_owner')}
+                    >
+                      🏪 Merchant
+                    </button>
+                  </div>
+                )}
               </div>
             ) : (
               <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
@@ -369,7 +621,7 @@ export function Navbar({ activePage, setActivePage }) {
               <span>👑</span> <span>Growth Plans</span>
             </button>
 
-            {user?.accountType === 'shop_owner' && (
+            {(user?.accountType === 'shop_owner' || shop) && (
               <button
                 style={{
                   display: 'flex',

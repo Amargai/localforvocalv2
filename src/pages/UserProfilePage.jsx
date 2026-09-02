@@ -6,16 +6,55 @@ import { ShopCard } from '../components/ShopCard';
 import { UserIcon, LocationIcon, PhoneIcon, PlusIcon } from '../components/Icons';
 
 export function UserProfilePage({ setActivePage, onSelectShop }) {
-  const { user, openAuthModal, logout } = useAuth();
+  const { user, openAuthModal, logout, refreshSession } = useAuth();
   const [myRequirements, setMyRequirements] = useState([]);
   const [favoriteShops, setFavoriteShops] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('requirements'); // 'requirements', 'favorites'
 
+  // Edit Profile State
+  const [isEditing, setIsEditing] = useState(false);
+  const [editName, setEditName] = useState(user?.name || '');
+  const [editPhone, setEditPhone] = useState(user?.phone || '');
+  const [editArea, setEditArea] = useState(user?.area || '');
+  const [editCity, setEditCity] = useState(user?.city || '');
+  const [savingProfile, setSavingProfile] = useState(false);
+  const [profileMsg, setProfileMsg] = useState('');
+
   useEffect(() => {
     if (!user) return;
+    setEditName(user.name || '');
+    setEditPhone(user.phone || '');
+    setEditArea(user.area || '');
+    setEditCity(user.city || '');
     loadProfileData();
   }, [user]);
+
+  async function handleSaveProfile(e) {
+    e.preventDefault();
+    try {
+      setSavingProfile(true);
+      setProfileMsg('');
+      const res = await api('/auth/profile', {
+        method: 'PUT',
+        body: JSON.stringify({
+          name: editName.trim(),
+          phone: editPhone.trim() || undefined,
+          area: editArea.trim() || undefined,
+          city: editCity.trim() || undefined
+        })
+      });
+
+      await refreshSession();
+      setIsEditing(false);
+      setProfileMsg('✅ Profile updated successfully!');
+      setTimeout(() => setProfileMsg(''), 4000);
+    } catch (err) {
+      alert(err.message || 'Failed to update profile');
+    } finally {
+      setSavingProfile(false);
+    }
+  }
 
   async function loadProfileData() {
     try {
@@ -55,6 +94,12 @@ export function UserProfilePage({ setActivePage, onSelectShop }) {
   return (
     <div style={{ padding: '40px 0 80px' }}>
       <div className="container">
+        {profileMsg && (
+          <div style={{ background: 'rgba(34, 197, 94, 0.12)', border: '1px solid rgba(34, 197, 94, 0.3)', color: '#4ade80', padding: '12px 18px', borderRadius: '10px', marginBottom: '20px', fontWeight: 600 }}>
+            {profileMsg}
+          </div>
+        )}
+
         {/* User Card */}
         <div style={{
           background: 'var(--bg-card)',
@@ -71,20 +116,19 @@ export function UserProfilePage({ setActivePage, onSelectShop }) {
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
             <div style={{
-              width: '48px',
-              height: '48px',
+              width: '54px',
+              height: '54px',
               borderRadius: '50%',
               background: 'linear-gradient(135deg, #15803d 0%, #22c55e 100%)',
               color: 'white',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              fontSize: '1.3rem',
+              fontSize: '1.4rem',
               fontWeight: 800
             }}>
               {user.name.charAt(0)}
             </div>
-
 
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
@@ -92,14 +136,17 @@ export function UserProfilePage({ setActivePage, onSelectShop }) {
                 <span className="badge badge-green">{user.accountType.toUpperCase()}</span>
               </div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '16px', color: 'var(--text-muted)', fontSize: '0.88rem' }}>
-                {user.phone && <span>📱 {user.phone}</span>}
+                {user.phone && <span>📱 +91 {user.phone}</span>}
                 {user.email && <span>✉️ {user.email}</span>}
-                <span>📍 {user.area || 'Neighborhood'}, {user.city || 'Local'}</span>
+                <span>📍 {user.area || 'Neighborhood'}, {user.city || 'Local Area'}</span>
               </div>
             </div>
           </div>
 
-          <div style={{ display: 'flex', gap: '10px' }}>
+          <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+            <button className="btn btn-secondary" onClick={() => setIsEditing(true)}>
+              ✏️ Edit Profile
+            </button>
             <button className="btn btn-primary" onClick={() => setActivePage('requirements')}>
               <PlusIcon className="w-4 h-4" />
               Post Requirement
@@ -109,6 +156,75 @@ export function UserProfilePage({ setActivePage, onSelectShop }) {
             </button>
           </div>
         </div>
+
+        {/* Edit Profile Modal */}
+        {isEditing && (
+          <div className="modal-overlay" onClick={() => setIsEditing(false)}>
+            <div className="modal-card" style={{ maxWidth: '480px' }} onClick={e => e.stopPropagation()}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+                <h3 style={{ fontSize: '1.3rem', fontWeight: 800 }}>Edit Your Profile</h3>
+                <button onClick={() => setIsEditing(false)} style={{ background: 'transparent', color: 'var(--text-muted)' }}>✕</button>
+              </div>
+
+              <form onSubmit={handleSaveProfile}>
+                <div className="form-group">
+                  <label className="form-label">Full Name *</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    value={editName}
+                    onChange={e => setEditName(e.target.value)}
+                    required
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Mobile Number</label>
+                  <input
+                    type="tel"
+                    className="form-input"
+                    placeholder="10-digit mobile number"
+                    value={editPhone}
+                    onChange={e => setEditPhone(e.target.value)}
+                  />
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                  <div className="form-group">
+                    <label className="form-label">Neighborhood / Area</label>
+                    <input
+                      type="text"
+                      className="form-input"
+                      placeholder="e.g. Andheri East"
+                      value={editArea}
+                      onChange={e => setEditArea(e.target.value)}
+                    />
+                  </div>
+
+                  <div className="form-group">
+                    <label className="form-label">City</label>
+                    <input
+                      type="text"
+                      className="form-input"
+                      placeholder="e.g. Mumbai"
+                      value={editCity}
+                      onChange={e => setEditCity(e.target.value)}
+                    />
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', gap: '10px', marginTop: '20px' }}>
+                  <button type="button" className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setIsEditing(false)}>
+                    Cancel
+                  </button>
+                  <button type="submit" className="btn btn-primary" style={{ flex: 1 }} disabled={savingProfile}>
+                    {savingProfile ? 'Saving...' : 'Save Changes'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
 
         {/* Tab Navigation */}
         <div style={{ display: 'flex', gap: '12px', borderBottom: '1px solid var(--border)', paddingBottom: '12px', marginBottom: '24px' }}>
@@ -157,7 +273,12 @@ export function UserProfilePage({ setActivePage, onSelectShop }) {
             ) : (
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: '20px' }}>
                 {myRequirements.map((req) => (
-                  <RequirementCard key={req.id} requirement={req} onRefresh={loadProfileData} />
+                  <RequirementCard
+                    key={req.id}
+                    requirement={req}
+                    onRefresh={loadProfileData}
+                    setActivePage={setActivePage}
+                  />
                 ))}
               </div>
             )}

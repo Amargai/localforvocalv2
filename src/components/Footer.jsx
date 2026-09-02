@@ -45,8 +45,19 @@ export function Footer({ setActivePage }) {
           </div>
         </div>
 
-        <div style={{ borderTop: '1px solid #1e293b', paddingTop: '24px', textAlign: 'center', fontSize: '0.85rem' }}>
-          © {new Date().getFullYear()} Local for Vocal v2. All rights reserved.
+        <div style={{ borderTop: '1px solid #1e293b', paddingTop: '24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px', fontSize: '0.85rem' }}>
+          <div>© {new Date().getFullYear()} Local for Vocal v2. All rights reserved.</div>
+          <a
+            href="#admin-login"
+            onClick={(e) => { e.preventDefault(); setActivePage('admin-login'); }}
+            style={{ color: '#475569', fontSize: '0.78rem', textDecoration: 'none', transition: 'color 0.2s', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+            title="Platform Administration Portal"
+            onMouseOver={(e) => e.currentTarget.style.color = '#94a3b8'}
+            onMouseOut={(e) => e.currentTarget.style.color = '#475569'}
+          >
+            <span>🔒</span>
+            <span>Staff Gateway</span>
+          </a>
         </div>
       </div>
     </footer>

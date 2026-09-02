@@ -1,28 +1,38 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../utils/api';
-import { CATEGORIES } from '../utils/constants';
+import { useAuth } from '../context/AuthContext';
+import { useCategories } from '../context/CategoryContext';
 import { ShopCard } from '../components/ShopCard';
 import { RequirementCard } from '../components/RequirementCard';
 import { SearchIcon, LocationIcon, SparklesIcon, PlusIcon, ChevronRightIcon } from '../components/Icons';
 
 export function HomePage({ setActivePage, setSelectedCategory, onSelectShop, searchQuery, setSearchQuery }) {
+  const { user } = useAuth();
+  const { rawCategories } = useCategories();
   const [featuredShops, setFeaturedShops] = useState([]);
   const [recentRequirements, setRecentRequirements] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     loadHomeData();
-  }, []);
+  }, [user?.id]);
 
   async function loadHomeData() {
     try {
       setLoading(true);
+      const reqUrl = user?.id ? `/requirements?excludeUser=${encodeURIComponent(user.id)}&limit=10` : '/requirements?limit=10';
       const [shopsRes, reqsRes] = await Promise.all([
         api('/shops/featured'),
-        api('/requirements?limit=3')
+        api(reqUrl)
       ]);
       setFeaturedShops(shopsRes.shops || []);
-      setRecentRequirements(reqsRes.requirements ? reqsRes.requirements.slice(0, 3) : []);
+
+      const allReqs = reqsRes.requirements || [];
+      const filteredReqs = user?.id
+        ? allReqs.filter(r => r.customerId !== user.id && r.customer_id !== user.id)
+        : allReqs;
+
+      setRecentRequirements(filteredReqs.slice(0, 3));
     } catch (err) {
       console.error(err);
     } finally {
@@ -80,7 +90,7 @@ export function HomePage({ setActivePage, setSelectedCategory, onSelectShop, sea
           </div>
 
           <div className="category-grid">
-            {CATEGORIES.slice(1, 13).map((cat) => (
+            {rawCategories.slice(0, 12).map((cat) => (
               <div
                 key={cat.id}
                 className="category-card"
@@ -165,7 +175,12 @@ export function HomePage({ setActivePage, setSelectedCategory, onSelectShop, sea
 
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '20px' }}>
                 {recentRequirements.map((req) => (
-                  <RequirementCard key={req.id} requirement={req} onRefresh={loadHomeData} />
+                  <RequirementCard
+                    key={req.id}
+                    requirement={req}
+                    onRefresh={loadHomeData}
+                    setActivePage={setActivePage}
+                  />
                 ))}
               </div>
             </div>

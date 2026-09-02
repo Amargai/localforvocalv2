@@ -5,10 +5,12 @@
   "description": "Local For Vocal v2 - 100% Free, Local-First Neighborhood Discovery & Marketplace",
   "scripts": {
     "dev": "concurrently \"npm run server\" \"npm run client\"",
-    "server": "nodemon server/src/server.js",
+    "server": "nodemon --watch server server/src/server.js",
     "client": "vite",
     "build": "vite build",
-    "start": "node server/src/server.js"
+    "start": "node server/src/server.js",
+    "db": "node server/src/utils/db-cli.js",
+    "test": "node tests/run-all-pages.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
@@ -20,6 +22,7 @@
     "jsonwebtoken": "^9.0.2",
     "leaflet": "^1.9.4",
     "multer": "^1.4.5-lts.1",
+    "pg": "^8.23.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },

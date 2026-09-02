@@ -9,7 +9,23 @@ fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 // Initialize 100% native built-in SQLite (zero external C++ dependencies, 100% on-device storage)
 const db = new DatabaseSync(dbPath);
 db.exec('PRAGMA journal_mode = WAL;');
+db.exec('PRAGMA synchronous = NORMAL;');
 db.exec('PRAGMA foreign_keys = ON;');
+db.exec('PRAGMA busy_timeout = 8000;');
+db.exec('PRAGMA cache_size = -64000;');
+
+/**
+ * Safe JSON parse helper to prevent server crashes on corrupted DB strings
+ */
+function safeJsonParse(str, fallback = []) {
+  if (!str) return fallback;
+  if (typeof str !== 'string') return str;
+  try {
+    return JSON.parse(str);
+  } catch (e) {
+    return fallback;
+  }
+}
 
 function initSchema() {
   db.exec(`
@@ -88,6 +104,8 @@ function initSchema() {
       city TEXT,
       latitude REAL,
       longitude REAL,
+      target_shop_id TEXT,
+      target_shop_name TEXT,
       status TEXT NOT NULL DEFAULT 'open',
       responses TEXT NOT NULL DEFAULT '[]',
       created_at TEXT NOT NULL,
@@ -121,8 +139,26 @@ function initSchema() {
       FOREIGN KEY(shop_id) REFERENCES shops(id) ON DELETE CASCADE
     );
     CREATE INDEX IF NOT EXISTS idx_products_shop ON products(shop_id);
+
+    CREATE TABLE IF NOT EXISTS categories (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      icon TEXT NOT NULL DEFAULT '🏷️',
+      color TEXT DEFAULT '#10b981',
+      description TEXT,
+      sub_categories TEXT NOT NULL DEFAULT '[]',
+      suggested_tags TEXT NOT NULL DEFAULT '[]',
+      is_active INTEGER NOT NULL DEFAULT 1,
+      display_order INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_categories_order ON categories(display_order);
   `);
 
+  // Safe table migrations for existing database files
+  try { db.exec('ALTER TABLE requirements ADD COLUMN target_shop_id TEXT;'); } catch (e) {}
+  try { db.exec('ALTER TABLE requirements ADD COLUMN target_shop_name TEXT;'); } catch (e) {}
 
   seedDefaultData();
 }
@@ -461,11 +497,195 @@ function seedDefaultData() {
     }
   }
 
-  console.log('✅ Local SQLite database initialized with sample records, deals & products!');
+  // 6. Check & Create Default Categories
+  const catCountRow = db.prepare('SELECT COUNT(*) as count FROM categories').get();
+  if (!catCountRow || catCountRow.count === 0) {
+    console.log('🌱 Seeding default categories...');
+    const defaultCategories = [
+      {
+        id: 'medical',
+        name: 'Medical & Healthcare',
+        icon: '🏥',
+        color: '#ef4444',
+        description: 'Pharmacies, Clinics, Diagnostic Labs',
+        sub_categories: JSON.stringify(['Pharmacy', 'Clinic / Doctor', 'Dental Care', 'Eye Care', 'Diagnostic Lab', 'Ayurvedic Medicine']),
+        suggested_tags: JSON.stringify(['Medicines', 'BP Monitor', 'Diabetic Supplies', 'Baby Care', 'First Aid', 'Home Delivery', '24x7 Open']),
+        display_order: 1
+      },
+      {
+        id: 'food',
+        name: 'Food & Dining',
+        icon: '🍲',
+        color: '#f97316',
+        description: 'Tiffin Services, Restaurants, Bakeries',
+        sub_categories: JSON.stringify(['Tiffin Service', 'Restaurant', 'Cafe', 'Bakery', 'Fast Food & Snacks', 'Catering']),
+        suggested_tags: JSON.stringify(['Veg Thali', 'Non-Veg', 'Home Delivery', 'Breakfast', 'Lunch', 'Dinner', 'Custom Cakes', 'Fresh Snacks']),
+        display_order: 2
+      },
+      {
+        id: 'carpenter',
+        name: 'Carpentry & Woodwork',
+        icon: '🪚',
+        color: '#854d0e',
+        description: 'Custom Furniture, Repairs, Fittings',
+        sub_categories: JSON.stringify(['Custom Furniture', 'Modular Kitchen', 'Doors & Windows', 'Wood Polish', 'Emergency Repair']),
+        suggested_tags: JSON.stringify(['Sofa Repair', 'Wardrobe', 'Study Table', 'Bed', 'Modular Kitchen', 'Door Locks', 'Wood Polish']),
+        display_order: 3
+      },
+      {
+        id: 'goldsmith',
+        name: 'Jewellery & Goldsmith',
+        icon: '💍',
+        color: '#eab308',
+        description: 'Jewellery Making, Repair, Polishing',
+        sub_categories: JSON.stringify(['Jewellery Making', 'Repair & Resizing', 'Stone Setting', 'Gold Polish & Cleaning']),
+        suggested_tags: JSON.stringify(['Ring Resizing', 'Chain Repair', 'Custom Jewellery', 'Earring Repair', 'Gold Polish']),
+        display_order: 4
+      },
+      {
+        id: 'tailor',
+        name: 'Tailoring & Boutique',
+        icon: '✂️',
+        color: '#ec4899',
+        description: 'Custom Stitching, Alterations, Suits',
+        sub_categories: JSON.stringify(['Ladies Tailor', 'Gents Tailor', 'Boutique & Designer', 'Alterations', 'Embroidery']),
+        suggested_tags: JSON.stringify(['Blouse Stitching', 'Suit & Tuxedo', 'Kurta', 'Dress Fitting', 'Alterations', 'School Uniforms']),
+        display_order: 5
+      },
+      {
+        id: 'electronics',
+        name: 'Electronics & Repair',
+        icon: '📱',
+        color: '#3b82f6',
+        description: 'Mobile, Laptop, Appliance Service',
+        sub_categories: JSON.stringify(['Mobile Screen Repair', 'Battery Change', 'Laptop Repair', 'TV & AC Repair', 'CCTV Installation']),
+        suggested_tags: JSON.stringify(['iPhone Repair', 'Android Screen', 'Battery Replacement', 'Laptop Upgrade', 'CCTV Fitting', 'AC Gas Refill']),
+        display_order: 6
+      },
+      {
+        id: 'salon',
+        name: 'Salon, Spa & Beauty',
+        icon: '💇',
+        color: '#a855f7',
+        description: 'Haircut, Grooming, Bridal Makeup',
+        sub_categories: JSON.stringify(['Ladies Salon', 'Gents Grooming', 'Unisex Salon', 'Spa & Massage', 'Bridal Makeup']),
+        suggested_tags: JSON.stringify(['Haircut', 'Facial & Glow', 'Waxing', 'Threading', 'Hair Coloring', 'Bridal Makeup', 'Beard Styling']),
+        display_order: 7
+      },
+      {
+        id: 'grocery',
+        name: 'Grocery & Daily Needs',
+        icon: '🛒',
+        color: '#10b981',
+        description: 'Kirana, Supermarkets, Organic',
+        sub_categories: JSON.stringify(['General Kirana', 'Supermarket', 'Organic & Farm Fresh', 'Dairy & Sweets']),
+        suggested_tags: JSON.stringify(['Daily Groceries', 'Dairy Milk', 'Cold Drinks', 'Rice & Pulses', 'Cooking Oils', 'Home Delivery']),
+        display_order: 8
+      },
+      {
+        id: 'plumber',
+        name: 'Plumbing & Electrical',
+        icon: '🔧',
+        color: '#06b6d4',
+        description: 'Emergency Leaks, Wiring, Fittings',
+        sub_categories: JSON.stringify(['Plumbing Repair', 'Electrical Wiring', 'Water Tank Cleaning', 'Bathroom Fitting', '24hr Emergency']),
+        suggested_tags: JSON.stringify(['Pipe Leakage', 'Tap Fitting', 'Short Circuit Fix', 'Water Heater Repair', '24hr Emergency']),
+        display_order: 9
+      },
+      {
+        id: 'auto',
+        name: 'Auto Care & Mechanic',
+        icon: '🚗',
+        color: '#64748b',
+        description: 'Car & Bike Repair, Tyre Puncture',
+        sub_categories: JSON.stringify(['Car Service', 'Bike Repair', 'Tyre Puncture & Alignment', 'Car Wash', 'Spare Parts']),
+        suggested_tags: JSON.stringify(['Engine Oil Change', 'Puncture Repair', 'Brake Service', 'Foam Wash', 'Battery Jumpstart']),
+        display_order: 10
+      },
+      {
+        id: 'education',
+        name: 'Tuitions & Coaching',
+        icon: '📚',
+        color: '#6366f1',
+        description: 'School Classes, Spoken English',
+        sub_categories: JSON.stringify(['School Tuition', 'Coaching Centre', 'Spoken English', 'Computer Training', 'Music Classes']),
+        suggested_tags: JSON.stringify(['CBSE & SSC', 'Maths Tutor', 'Science Tutor', 'English Speaking', 'Coding Basics']),
+        display_order: 11
+      },
+      {
+        id: 'gym',
+        name: 'Fitness & Gym',
+        icon: '🏋️',
+        color: '#14b8a6',
+        description: 'Workouts, Yoga, Personal Training',
+        sub_categories: JSON.stringify(['Gym & Weights', 'Yoga & Meditation', 'Zumba & Dance', 'Personal Trainer']),
+        suggested_tags: JSON.stringify(['Weight Loss', 'Muscle Gain', 'Cardio', 'Morning Batches', 'Diet Consultation']),
+        display_order: 12
+      },
+      {
+        id: 'hardware',
+        name: 'Hardware & Sanitary',
+        icon: '🔨',
+        color: '#78716c',
+        description: 'Paints, Tools, Bathroom Hardware',
+        sub_categories: JSON.stringify(['Hardware & Tools', 'Paint & Wall Finishes', 'Sanitary & Pipes']),
+        suggested_tags: JSON.stringify(['Asian Paints', 'Drill Machine', 'Screws & Bolts', 'Bathroom Taps', 'Electrical Switches']),
+        display_order: 13
+      },
+      {
+        id: 'stationery',
+        name: 'Stationery & Printing',
+        icon: '📝',
+        color: '#0284c7',
+        description: 'Xerox, Office Supplies, Books',
+        sub_categories: JSON.stringify(['Stationery & Books', 'Printing & Xerox', 'Gift Items', 'Document Binding']),
+        suggested_tags: JSON.stringify(['Color Printouts', 'Spiral Binding', 'School Notebooks', 'Art Supplies', 'Lamination']),
+        display_order: 14
+      },
+      {
+        id: 'other',
+        name: 'Other Local Services',
+        icon: '💡',
+        color: '#6b7280',
+        description: 'Specialized Neighborhood Services',
+        sub_categories: JSON.stringify(['General Service', 'Other Specialty']),
+        suggested_tags: JSON.stringify(['Quick Service', 'Reliable', 'Neighborhood Favorite']),
+        display_order: 15
+      }
+    ];
+
+    const insertCat = db.prepare(`
+      INSERT OR IGNORE INTO categories (id, name, icon, color, description, sub_categories, suggested_tags, is_active, display_order, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
+    `);
+
+    for (const c of defaultCategories) {
+      insertCat.run(c.id, c.name, c.icon, c.color, c.description, c.sub_categories, c.suggested_tags, c.display_order, now, now);
+    }
+  }
+
+  console.log('✅ Local SQLite database initialized with sample records, deals, products & categories!');
 }
 
 
 
+/**
+ * Helper to run atomic multi-statement database operations
+ * Ensures full rollback on error and prevents partial data corruption
+ */
+function withTransaction(fn) {
+  db.exec('BEGIN IMMEDIATE;');
+  try {
+    const result = fn();
+    db.exec('COMMIT;');
+    return result;
+  } catch (err) {
+    try { db.exec('ROLLBACK;'); } catch (e) {}
+    throw err;
+  }
+}
+
 initSchema();
 
-module.exports = { db, dbPath };
+module.exports = { db, dbPath, safeJsonParse, withTransaction };
+

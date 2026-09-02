@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f172a"/>
+      <stop offset="50%" stop-color="#080911"/>
+      <stop offset="100%" stop-color="#042f1f"/>
+    </linearGradient>
+    <linearGradient id="leafGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#4ade80"/>
+      <stop offset="100%" stop-color="#10b981"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="128" fill="url(#bgGrad)"/>
+  <circle cx="256" cy="256" r="210" fill="none" stroke="#10b981" stroke-width="8" opacity="0.4"/>
+  <g transform="translate(100, 100) scale(0.61)">
+    <path d="M440,64 C440,64 360,40 256,144 C152,248 128,328 128,328 L64,392 C56,400 56,416 68,428 C80,440 96,440 104,432 L168,368 C168,368 248,344 352,240 C456,136 440,64 440,64 Z" fill="url(#leafGrad)"/>
+    <path d="M128,328 L256,200" stroke="#042f1f" stroke-width="24" stroke-linecap="round"/>
+  </g>
+  <text x="256" y="440" font-family="'Plus Jakarta Sans', sans-serif" font-weight="900" font-size="52" fill="#ffffff" text-anchor="middle" letter-spacing="2">LOCAL4VOCAL</text>
+</svg>

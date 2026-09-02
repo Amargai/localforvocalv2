@@ -8,7 +8,7 @@ export function AuthProvider({ children }) {
   const [shop, setShop] = useState(null);
   const [loading, setLoading] = useState(true);
   const [authModalOpen, setAuthModalOpen] = useState(false);
-  const [authModalTab, setAuthModalTab] = useState('demo'); // 'demo', 'otp', 'email'
+  const [authModalTab, setAuthModalTab] = useState('otp'); // 'otp', 'email'
 
   // Load session on startup
   useEffect(() => {
@@ -28,7 +28,19 @@ export function AuthProvider({ children }) {
     }
   }
 
-  // 1-Click Fast Demo Login
+  // Secure Admin Gateway Login (Restricted exclusively to platform administrators)
+  async function loginAdmin(username, password) {
+    const res = await api('/auth/admin-login', {
+      method: 'POST',
+      body: JSON.stringify({ username, password })
+    });
+    if (res.token) localStorage.setItem('l4v_token', res.token);
+    setUser(res.user);
+    await refreshSession();
+    return res;
+  }
+
+  // 1-Click Fast Demo Login (Maintained for Developer / CI Testing)
   async function demoLogin(role = 'customer') {
     const res = await api('/auth/demo-login', {
       method: 'POST',
@@ -41,19 +53,19 @@ export function AuthProvider({ children }) {
     return res;
   }
 
-  // Request Local Free OTP
-  async function sendOtp(phone) {
+  // Request OTP for Login or Registration
+  async function sendOtp(phone, purpose = 'login') {
     return await api('/auth/send-otp', {
       method: 'POST',
-      body: JSON.stringify({ phone })
+      body: JSON.stringify({ phone, purpose })
     });
   }
 
-  // Verify Free OTP
-  async function verifyOtp(phone, code, name, accountType) {
+  // Verify OTP for Login or Registration
+  async function verifyOtp(phone, code, purpose = 'login', name, accountType) {
     const res = await api('/auth/verify-otp', {
       method: 'POST',
-      body: JSON.stringify({ phone, code, name, accountType })
+      body: JSON.stringify({ phone, code, purpose, name, accountType })
     });
     if (res.token) localStorage.setItem('l4v_token', res.token);
     setUser(res.user);
@@ -99,7 +111,19 @@ export function AuthProvider({ children }) {
     }
   }
 
-  const openAuthModal = (tab = 'demo') => {
+  // Switch Active Mode for the same authenticated user (Customer <-> Shop Owner)
+  async function switchMode(mode) {
+    const res = await api('/auth/switch-mode', {
+      method: 'POST',
+      body: JSON.stringify({ mode })
+    });
+    if (res.token) localStorage.setItem('l4v_token', res.token);
+    setUser(res.user);
+    await refreshSession();
+    return res;
+  }
+
+  const openAuthModal = (tab = 'otp') => {
     setAuthModalTab(tab);
     setAuthModalOpen(true);
   };
@@ -114,11 +138,13 @@ export function AuthProvider({ children }) {
       setAuthModalOpen,
       setAuthModalTab,
       openAuthModal,
+      loginAdmin,
       demoLogin,
       sendOtp,
       verifyOtp,
       loginWithPassword,
       registerUser,
+      switchMode,
       logout,
       refreshSession
     }}>

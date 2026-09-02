@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../utils/api';
 import { useAuth } from '../context/AuthContext';
+import { useCategories } from '../context/CategoryContext';
 import {
   StarIcon,
   ShieldCheckIcon,
@@ -15,6 +16,7 @@ import {
 
 export function AdminPage({ setActivePage }) {
   const { user, logout } = useAuth();
+  const { rawCategories, refreshCategories, addCategory, updateCategory, deleteCategory } = useCategories();
   const [activeTab, setActiveTab] = useState('overview'); // 'overview', 'shops', 'users', 'requirements', 'subscriptions', 'reviews', 'reports', 'categories'
 
   const [stats, setStats] = useState(null);
@@ -23,6 +25,7 @@ export function AdminPage({ setActivePage }) {
   const [requirements, setRequirements] = useState([]);
   const [reviews, setReviews] = useState([]);
   const [activities, setActivities] = useState([]);
+  const [adminCategories, setAdminCategories] = useState([]);
   const [loading, setLoading] = useState(true);
 
   // Filters for Shops tab
@@ -32,6 +35,28 @@ export function AdminPage({ setActivePage }) {
 
   // Filters for Users tab
   const [userSearch, setUserSearch] = useState('');
+
+  // Category Tab State & Modals
+  const [categorySearch, setCategorySearch] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('all'); // 'all', 'active', 'with_shops'
+  const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
+  const [categoryModalMode, setCategoryModalMode] = useState('add'); // 'add', 'edit'
+  const [categoryForm, setCategoryForm] = useState({
+    id: '',
+    name: '',
+    icon: '🏷️',
+    color: '#10b981',
+    description: '',
+    subCategories: [],
+    suggestedTags: [],
+    isActive: true
+  });
+  const [subCatInput, setSubCatInput] = useState('');
+  const [tagInput, setTagInput] = useState('');
+  const [categorySubmitting, setCategorySubmitting] = useState(false);
+  const [categoryError, setCategoryError] = useState('');
+  const [deletingCategory, setDeletingCategory] = useState(null);
+  const [isDeletingCategory, setIsDeletingCategory] = useState(false);
 
   // Selected shop for detail preview modal
   const [selectedShopModal, setSelectedShopModal] = useState(null);
@@ -58,13 +83,14 @@ export function AdminPage({ setActivePage }) {
   async function loadAdminData() {
     try {
       setLoading(true);
-      const [statsRes, shopsRes, usersRes, reqsRes, revsRes, actRes] = await Promise.all([
+      const [statsRes, shopsRes, usersRes, reqsRes, revsRes, actRes, catsRes] = await Promise.all([
         api('/admin/stats').catch(() => null),
         api('/admin/shops').catch(() => ({ shops: [] })),
         api('/admin/users').catch(() => ({ users: [] })),
         api('/admin/requirements').catch(() => ({ requirements: [] })),
         api('/admin/reviews').catch(() => ({ reviews: [] })),
-        api('/admin/activity').catch(() => ({ activities: [] }))
+        api('/admin/activity').catch(() => ({ activities: [] })),
+        api('/admin/categories').catch(() => ({ categories: [] }))
       ]);
 
       setStats(statsRes);
@@ -73,6 +99,7 @@ export function AdminPage({ setActivePage }) {
       setRequirements(reqsRes?.requirements || []);
       setReviews(revsRes?.reviews || []);
       setActivities(actRes?.activities || []);
+      setAdminCategories(catsRes?.categories || []);
     } catch (err) {
       console.error(err);
     } finally {
@@ -121,6 +148,149 @@ export function AdminPage({ setActivePage }) {
       await loadAdminData();
     } catch (err) {
       alert(err.message || 'Failed to delete review');
+    }
+  }
+
+  // Category Modal Handlers
+  function openAddCategoryModal() {
+    setCategoryModalMode('add');
+    setCategoryForm({
+      id: '',
+      name: '',
+      icon: '🏷️',
+      color: '#10b981',
+      description: '',
+      subCategories: [],
+      suggestedTags: [],
+      isActive: true
+    });
+    setSubCatInput('');
+    setTagInput('');
+    setCategoryError('');
+    setIsCategoryModalOpen(true);
+  }
+
+  function openEditCategoryModal(cat) {
+    setCategoryModalMode('edit');
+    setCategoryForm({
+      id: cat.id,
+      name: cat.name,
+      icon: cat.icon || '🏷️',
+      color: cat.color || '#10b981',
+      description: cat.description || cat.desc || '',
+      subCategories: Array.isArray(cat.subCategories) ? [...cat.subCategories] : [],
+      suggestedTags: Array.isArray(cat.suggestedTags) ? [...cat.suggestedTags] : [],
+      isActive: cat.isActive ?? true
+    });
+    setSubCatInput('');
+    setTagInput('');
+    setCategoryError('');
+    setIsCategoryModalOpen(true);
+  }
+
+  function handleNameChange(nameVal) {
+    if (categoryModalMode === 'add') {
+      const slug = nameVal.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+      setCategoryForm(prev => ({ ...prev, name: nameVal, id: slug }));
+    } else {
+      setCategoryForm(prev => ({ ...prev, name: nameVal }));
+    }
+  }
+
+  function handleAddSubCategory() {
+    if (!subCatInput.trim()) return;
+    const newItems = subCatInput.split(',').map(s => s.trim()).filter(Boolean);
+    setCategoryForm(prev => ({
+      ...prev,
+      subCategories: Array.from(new Set([...prev.subCategories, ...newItems]))
+    }));
+    setSubCatInput('');
+  }
+
+  function handleRemoveSubCategory(index) {
+    setCategoryForm(prev => ({
+      ...prev,
+      subCategories: prev.subCategories.filter((_, i) => i !== index)
+    }));
+  }
+
+  function handleAddSuggestedTag() {
+    if (!tagInput.trim()) return;
+    const newItems = tagInput.split(',').map(s => s.trim().replace(/^#/, '')).filter(Boolean);
+    setCategoryForm(prev => ({
+      ...prev,
+      suggestedTags: Array.from(new Set([...prev.suggestedTags, ...newItems]))
+    }));
+    setTagInput('');
+  }
+
+  function handleRemoveSuggestedTag(index) {
+    setCategoryForm(prev => ({
+      ...prev,
+      suggestedTags: prev.suggestedTags.filter((_, i) => i !== index)
+    }));
+  }
+
+  async function handleSaveCategory(e) {
+    e.preventDefault();
+    if (!categoryForm.name.trim()) {
+      setCategoryError('Please enter a category name');
+      return;
+    }
+    if (!categoryForm.id.trim()) {
+      setCategoryError('Please specify a category identifier / slug');
+      return;
+    }
+
+    try {
+      setCategorySubmitting(true);
+      setCategoryError('');
+
+      if (categoryModalMode === 'add') {
+        await addCategory({
+          id: categoryForm.id,
+          name: categoryForm.name,
+          icon: categoryForm.icon,
+          color: categoryForm.color,
+          description: categoryForm.description,
+          subCategories: categoryForm.subCategories,
+          suggestedTags: categoryForm.suggestedTags,
+          isActive: categoryForm.isActive
+        });
+      } else {
+        await updateCategory(categoryForm.id, {
+          name: categoryForm.name,
+          icon: categoryForm.icon,
+          color: categoryForm.color,
+          description: categoryForm.description,
+          subCategories: categoryForm.subCategories,
+          suggestedTags: categoryForm.suggestedTags,
+          isActive: categoryForm.isActive
+        });
+      }
+
+      await loadAdminData();
+      await refreshCategories();
+      setIsCategoryModalOpen(false);
+    } catch (err) {
+      setCategoryError(err.message || 'Failed to save category');
+    } finally {
+      setCategorySubmitting(false);
+    }
+  }
+
+  async function handleConfirmDeleteCategory() {
+    if (!deletingCategory) return;
+    try {
+      setIsDeletingCategory(true);
+      await deleteCategory(deletingCategory.id);
+      await loadAdminData();
+      await refreshCategories();
+      setDeletingCategory(null);
+    } catch (err) {
+      alert(err.message || 'Failed to delete category');
+    } finally {
+      setIsDeletingCategory(false);
     }
   }
 
@@ -275,6 +445,9 @@ export function AdminPage({ setActivePage }) {
               <span>🗂️</span>
               <span>Categories</span>
             </div>
+            <span style={{ color: '#64748b', fontSize: '0.78rem', fontWeight: 600 }}>
+              {adminCategories.length || rawCategories.length}
+            </span>
           </div>
         </nav>
 
@@ -532,12 +705,9 @@ export function AdminPage({ setActivePage }) {
                   style={{ padding: '10px 14px', borderRadius: '10px', border: '1px solid var(--border)', background: 'var(--bg-input)', color: 'var(--text-heading)', fontWeight: 600 }}
                 >
                   <option value="all">All Categories</option>
-                  <option value="medical">Medical</option>
-                  <option value="carpenter">Carpenter</option>
-                  <option value="food">Food & Bakery</option>
-                  <option value="electronics">Electronics</option>
-                  <option value="tailor">Tailor</option>
-                  <option value="goldsmith">Goldsmith</option>
+                  {(adminCategories.length > 0 ? adminCategories : rawCategories).map((c) => (
+                    <option key={c.id} value={c.id}>{c.icon} {c.name}</option>
+                  ))}
                 </select>
               </div>
 
@@ -740,7 +910,14 @@ export function AdminPage({ setActivePage }) {
                       <tr key={r.id}>
                         <td>
                           <div style={{ fontWeight: 700, color: 'var(--text-heading)' }}>{r.title}</div>
-                          <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)', maxWidth: '340px' }}>{r.description}</div>
+                          {r.description && <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)', maxWidth: '340px' }}>{r.description}</div>}
+                          {(r.target_shop_name || r.targetShopName) && (
+                            <div style={{ marginTop: '4px' }}>
+                              <span className="badge badge-amber" style={{ fontSize: '0.72rem', padding: '1px 6px' }}>
+                                🎯 Direct: {r.target_shop_name || r.targetShopName}
+                              </span>
+                            </div>
+                          )}
                         </td>
                         <td>
                           <span className="badge badge-green">{r.category}</span>
@@ -937,42 +1114,695 @@ export function AdminPage({ setActivePage }) {
           )}
 
           {/* ====================================================
-              TAB 8: CATEGORIES BREAKDOWN
+          {/* ====================================================
+              TAB 8: CATEGORIES MANAGEMENT (Full Admin Control)
               ==================================================== */}
           {activeTab === 'categories' && (
             <div>
-              <div className="admin-heading-section">
-                <h1 className="admin-heading-title">Platform Categories</h1>
-                <p className="admin-heading-subtitle">Service types and distribution of neighborhood vendors</p>
+              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: '16px', marginBottom: '24px' }}>
+                <div className="admin-heading-section" style={{ marginBottom: 0 }}>
+                  <h1 className="admin-heading-title">Platform Categories</h1>
+                  <p className="admin-heading-subtitle">Create, customize and manage business categories, icons, sub-categories & search tags</p>
+                </div>
+                <button
+                  className="btn btn-primary"
+                  style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 20px', fontSize: '0.95rem', borderRadius: '12px', boxShadow: '0 4px 14px rgba(34, 197, 94, 0.35)' }}
+                  onClick={openAddCategoryModal}
+                >
+                  <span style={{ fontSize: '1.1rem' }}>✨</span>
+                  <span>+ Add New Category</span>
+                </button>
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: '16px' }}>
-                {[
-                  { name: 'Medical & Healthcare', icon: '💊', count: shops.filter(s => s.category === 'medical').length, color: '#16a34a' },
-                  { name: 'Carpentry & Woodwork', icon: '🪚', count: shops.filter(s => s.category === 'carpenter').length, color: '#d97706' },
-                  { name: 'Bakery & Food Delights', icon: '🥐', count: shops.filter(s => s.category === 'food').length, color: '#ea580c' },
-                  { name: 'Electronics & Repair', icon: '📱', count: shops.filter(s => s.category === 'electronics').length, color: '#2563eb' },
-                  { name: 'Tailoring & Boutique', icon: '🧵', count: shops.filter(s => s.category === 'tailor').length, color: '#9333ea' },
-                  { name: 'Goldsmith & Jewelry', icon: '💍', count: shops.filter(s => s.category === 'goldsmith').length, color: '#eab308' },
-                  { name: 'Plumber & Sanitation', icon: '🔧', count: shops.filter(s => s.category === 'plumber').length, color: '#0284c7' },
-                  { name: 'Electrician & Wiremen', icon: '⚡', count: shops.filter(s => s.category === 'electrician').length, color: '#ca8a04' }
-                ].map((c) => (
-                  <div key={c.name} style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '16px', padding: '20px', display: 'flex', alignItems: 'center', gap: '16px' }}>
-                    <div style={{ fontSize: '2rem' }}>{c.icon}</div>
-                    <div>
-                      <div style={{ fontWeight: 700, fontSize: '1rem' }}>{c.name}</div>
-                      <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '2px' }}>
-                        <strong>{c.count}</strong> Active Stores
+              {/* 4 Summary Metric Cards */}
+              <div className="admin-stats-grid" style={{ marginBottom: '24px' }}>
+                <div className="admin-stat-card">
+                  <div className="admin-stat-icon" style={{ background: 'rgba(34, 197, 94, 0.15)' }}>
+                    <span style={{ fontSize: '1.5rem' }}>🗂️</span>
+                  </div>
+                  <div>
+                    <div className="admin-stat-value">{(adminCategories.length > 0 ? adminCategories : rawCategories).length}</div>
+                    <div className="admin-stat-label">Total Categories</div>
+                    <div className="admin-stat-sub">Platform taxonomy</div>
+                  </div>
+                </div>
+
+                <div className="admin-stat-card">
+                  <div className="admin-stat-icon" style={{ background: 'rgba(59, 130, 246, 0.15)' }}>
+                    <span style={{ fontSize: '1.5rem' }}>✅</span>
+                  </div>
+                  <div>
+                    <div className="admin-stat-value">
+                      {(adminCategories.length > 0 ? adminCategories : rawCategories).filter(c => c.isActive !== false).length}
+                    </div>
+                    <div className="admin-stat-label">Active Categories</div>
+                    <div className="admin-stat-sub">Visible to residents</div>
+                  </div>
+                </div>
+
+                <div className="admin-stat-card">
+                  <div className="admin-stat-icon" style={{ background: 'rgba(245, 158, 11, 0.15)' }}>
+                    <span style={{ fontSize: '1.5rem' }}>🏪</span>
+                  </div>
+                  <div>
+                    <div className="admin-stat-value">
+                      {(adminCategories.length > 0 ? adminCategories : rawCategories).reduce((acc, c) => acc + (c.totalShops || c.shopCount || 0), 0)}
+                    </div>
+                    <div className="admin-stat-label">Mapped Shops</div>
+                    <div className="admin-stat-sub">Across all categories</div>
+                  </div>
+                </div>
+
+                <div className="admin-stat-card">
+                  <div className="admin-stat-icon" style={{ background: 'rgba(168, 85, 247, 0.15)' }}>
+                    <span style={{ fontSize: '1.5rem' }}>🏷️</span>
+                  </div>
+                  <div>
+                    <div className="admin-stat-value">
+                      {(adminCategories.length > 0 ? adminCategories : rawCategories).reduce((acc, c) => acc + (c.subCategories?.length || 0), 0)}
+                    </div>
+                    <div className="admin-stat-label">Sub-categories Defined</div>
+                    <div className="admin-stat-sub">Speciality filters</div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Search and Filters Bar */}
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', marginBottom: '20px', alignItems: 'center', justifyContent: 'space-between' }}>
+                <input
+                  type="text"
+                  placeholder="Search categories by name, slug, description, sub-specialty..."
+                  value={categorySearch}
+                  onChange={(e) => setCategorySearch(e.target.value)}
+                  style={{ flex: 1, minWidth: '260px', padding: '10px 14px', borderRadius: '10px', border: '1px solid var(--border)', background: 'var(--bg-input)', color: 'var(--text-heading)', outline: 'none' }}
+                />
+
+                <select
+                  value={categoryFilter}
+                  onChange={(e) => setCategoryFilter(e.target.value)}
+                  style={{ padding: '10px 14px', borderRadius: '10px', border: '1px solid var(--border)', background: 'var(--bg-input)', color: 'var(--text-heading)', fontWeight: 600 }}
+                >
+                  <option value="all">All Categories ({(adminCategories.length > 0 ? adminCategories : rawCategories).length})</option>
+                  <option value="active">Active Only</option>
+                  <option value="with_shops">With Registered Shops</option>
+                </select>
+              </div>
+
+              {/* Categories Cards Grid */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '18px' }}>
+                {(adminCategories.length > 0 ? adminCategories : rawCategories)
+                  .filter(c => {
+                    const matchQuery = !categorySearch.trim() ||
+                      c.name.toLowerCase().includes(categorySearch.toLowerCase()) ||
+                      c.id.toLowerCase().includes(categorySearch.toLowerCase()) ||
+                      (c.description && c.description.toLowerCase().includes(categorySearch.toLowerCase())) ||
+                      (Array.isArray(c.subCategories) && c.subCategories.some(s => s.toLowerCase().includes(categorySearch.toLowerCase()))) ||
+                      (Array.isArray(c.suggestedTags) && c.suggestedTags.some(t => t.toLowerCase().includes(categorySearch.toLowerCase())));
+
+                    const matchFilter = categoryFilter === 'all' ||
+                      (categoryFilter === 'active' ? c.isActive !== false : ((c.totalShops || c.shopCount || 0) > 0));
+
+                    return matchQuery && matchFilter;
+                  })
+                  .map((c) => (
+                    <div
+                      key={c.id}
+                      style={{
+                        background: 'var(--bg-card)',
+                        border: '1px solid var(--border)',
+                        borderRadius: '16px',
+                        padding: '20px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        justifyContent: 'space-between',
+                        gap: '16px',
+                        transition: 'transform 0.15s ease, box-shadow 0.15s ease',
+                        boxShadow: 'var(--shadow-sm)'
+                      }}
+                    >
+                      <div>
+                        {/* Header with Icon, Name, and Status */}
+                        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '12px', marginBottom: '12px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                            <div style={{
+                              width: '48px',
+                              height: '48px',
+                              borderRadius: '14px',
+                              background: `${c.color || '#10b981'}1f`,
+                              border: `1px solid ${c.color || '#10b981'}40`,
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              fontSize: '1.6rem',
+                              flexShrink: 0
+                            }}>
+                              {c.icon || '🏷️'}
+                            </div>
+                            <div>
+                              <div style={{ fontWeight: 800, fontSize: '1.05rem', color: 'var(--text-heading)', lineHeight: 1.2 }}>{c.name}</div>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '4px' }}>
+                                <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontFamily: 'monospace', background: 'rgba(255, 255, 255, 0.06)', padding: '2px 6px', borderRadius: '4px' }}>
+                                  #{c.id}
+                                </span>
+                                <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: c.color || '#10b981' }} title={`Theme: ${c.color || '#10b981'}`} />
+                              </div>
+                            </div>
+                          </div>
+
+                          <span className={`badge ${c.isActive !== false ? 'badge-green' : 'badge-gray'}`} style={{ fontSize: '0.72rem' }}>
+                            {c.isActive !== false ? 'Active' : 'Hidden'}
+                          </span>
+                        </div>
+
+                        {/* Description */}
+                        <p style={{ fontSize: '0.84rem', color: 'var(--text-muted)', marginBottom: '12px', minHeight: '36px', lineHeight: 1.4 }}>
+                          {c.description || c.desc || 'Specialized neighborhood services and local businesses.'}
+                        </p>
+
+                        {/* Store & Demand Counts */}
+                        <div style={{ display: 'flex', gap: '8px', marginBottom: '12px', flexWrap: 'wrap' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.78rem', background: 'var(--bg-surface)', padding: '4px 10px', borderRadius: '8px', border: '1px solid var(--border)', fontWeight: 600 }}>
+                            <span>🏪</span>
+                            <span>{c.totalShops || c.shopCount || 0} Registered Shops</span>
+                          </div>
+                          {c.requirementCount !== undefined && c.requirementCount > 0 && (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.78rem', background: 'rgba(245, 158, 11, 0.1)', color: '#fbbf24', padding: '4px 10px', borderRadius: '8px', border: '1px solid rgba(245, 158, 11, 0.25)', fontWeight: 600 }}>
+                              <span>📋</span>
+                              <span>{c.requirementCount} Demands</span>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Sub-categories */}
+                        {Array.isArray(c.subCategories) && c.subCategories.length > 0 && (
+                          <div style={{ marginBottom: '10px' }}>
+                            <div style={{ fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-light)', fontWeight: 700, marginBottom: '6px' }}>
+                              Sub-Categories ({c.subCategories.length})
+                            </div>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                              {c.subCategories.slice(0, 3).map((sub, idx) => (
+                                <span key={idx} style={{ fontSize: '0.75rem', padding: '2px 8px', borderRadius: '6px', background: 'var(--bg-surface)', color: 'var(--text-main)', border: '1px solid var(--border)' }}>
+                                  {sub}
+                                </span>
+                              ))}
+                              {c.subCategories.length > 3 && (
+                                <span style={{ fontSize: '0.75rem', padding: '2px 8px', borderRadius: '6px', background: 'rgba(255, 255, 255, 0.05)', color: 'var(--text-muted)' }}>
+                                  +{c.subCategories.length - 3} more
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Suggested Tags */}
+                        {Array.isArray(c.suggestedTags) && c.suggestedTags.length > 0 && (
+                          <div>
+                            <div style={{ fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-light)', fontWeight: 700, marginBottom: '6px' }}>
+                              Search Keywords
+                            </div>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                              {c.suggestedTags.slice(0, 3).map((tag, idx) => (
+                                <span key={idx} style={{ fontSize: '0.72rem', padding: '2px 6px', borderRadius: '4px', background: 'rgba(34, 197, 94, 0.08)', color: '#4ade80' }}>
+                                  #{tag}
+                                </span>
+                              ))}
+                              {c.suggestedTags.length > 3 && (
+                                <span style={{ fontSize: '0.72rem', padding: '2px 6px', color: 'var(--text-muted)' }}>
+                                  +{c.suggestedTags.length - 3}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Card Action Buttons */}
+                      <div style={{ display: 'flex', gap: '8px', borderTop: '1px solid var(--border)', paddingTop: '14px' }}>
+                        <button
+                          className="btn btn-secondary"
+                          style={{ flex: 1, padding: '7px 12px', fontSize: '0.82rem', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
+                          onClick={() => openEditCategoryModal(c)}
+                        >
+                          <span>✏️</span>
+                          <span>Edit</span>
+                        </button>
+                        <button
+                          className="btn btn-secondary"
+                          style={{ padding: '7px 12px', fontSize: '0.82rem', color: '#ef4444', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                          title="Delete category"
+                          onClick={() => setDeletingCategory(c)}
+                        >
+                          <span>🗑️</span>
+                        </button>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  ))}
               </div>
             </div>
           )}
         </div>
       </div>
+
+      {/* ====================================================
+          MODAL 1: ADD / EDIT CATEGORY MODAL
+          ==================================================== */}
+      {isCategoryModalOpen && (
+        <div className="modal-overlay" onClick={() => !categorySubmitting && setIsCategoryModalOpen(false)}>
+          <div
+            className="modal-card"
+            style={{ maxWidth: '640px', maxHeight: '92vh', overflowY: 'auto', position: 'relative' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Close button */}
+            <button
+              onClick={() => !categorySubmitting && setIsCategoryModalOpen(false)}
+              style={{ position: 'absolute', top: '20px', right: '20px', background: 'var(--bg-surface)', border: '1px solid var(--border)', color: 'var(--text-muted)', width: '32px', height: '32px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
+            >
+              ✕
+            </button>
+
+            {/* Modal Header */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '20px' }}>
+              <div style={{ width: '44px', height: '44px', borderRadius: '12px', background: 'rgba(34, 197, 94, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.4rem' }}>
+                {categoryModalMode === 'add' ? '✨' : '✏️'}
+              </div>
+              <div>
+                <h2 style={{ fontSize: '1.35rem', fontWeight: 800, color: 'var(--text-heading)', margin: 0 }}>
+                  {categoryModalMode === 'add' ? 'Add New Platform Category' : `Edit Category: ${categoryForm.name || categoryForm.id}`}
+                </h2>
+                <p style={{ fontSize: '0.84rem', color: 'var(--text-muted)', margin: '2px 0 0 0' }}>
+                  Define category name, emoji icon, color theme, sub-specialties, and search tags
+                </p>
+              </div>
+            </div>
+
+            {/* Form Error Banner */}
+            {categoryError && (
+              <div style={{ background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.3)', color: '#f87171', padding: '10px 14px', borderRadius: '10px', fontSize: '0.85rem', marginBottom: '16px', fontWeight: 600 }}>
+                ⚠️ {categoryError}
+              </div>
+            )}
+
+            <form onSubmit={handleSaveCategory}>
+              {/* Category Name & Slug */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '16px' }}>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label">Category Name *</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    placeholder="e.g. Pet Care & Veterinary"
+                    value={categoryForm.name}
+                    onChange={(e) => handleNameChange(e.target.value)}
+                    required
+                  />
+                </div>
+
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label">Identifier / Slug *</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    placeholder="e.g. pet-care"
+                    value={categoryForm.id}
+                    onChange={(e) => setCategoryForm(prev => ({ ...prev, id: e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '') }))}
+                    disabled={categoryModalMode === 'edit'}
+                    required
+                  />
+                  <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '4px' }}>
+                    {categoryModalMode === 'add' ? 'Auto-generated for routing & API' : 'Unique ID cannot be changed'}
+                  </div>
+                </div>
+              </div>
+
+              {/* Icon Emoji & Theme Color */}
+              <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr', gap: '14px', marginBottom: '16px' }}>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label">Icon Emoji *</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    style={{ fontSize: '1.4rem', textAlign: 'center' }}
+                    value={categoryForm.icon}
+                    onChange={(e) => setCategoryForm(prev => ({ ...prev, icon: e.target.value }))}
+                    maxLength={4}
+                    required
+                  />
+                </div>
+
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label">Theme Color *</label>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <input
+                      type="color"
+                      value={categoryForm.color || '#10b981'}
+                      onChange={(e) => setCategoryForm(prev => ({ ...prev, color: e.target.value }))}
+                      style={{ width: '42px', height: '42px', borderRadius: '8px', border: '1px solid var(--border)', background: 'transparent', cursor: 'pointer', padding: 0 }}
+                    />
+                    <input
+                      type="text"
+                      className="form-input"
+                      style={{ flex: 1 }}
+                      value={categoryForm.color || '#10b981'}
+                      onChange={(e) => setCategoryForm(prev => ({ ...prev, color: e.target.value }))}
+                      placeholder="#10b981"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Quick Emoji Suggestions Palette */}
+              <div style={{ marginBottom: '16px' }}>
+                <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '6px', fontWeight: 600 }}>
+                  Quick Icon Suggestions (Click to select):
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                  {['🐾', '🌿', '📸', '🧼', '☕', '🎂', '📦', '🎨', '🚗', '🏥', '🛒', '💇', '🪚', '💍', '✂️', '📱', '🔧', '🏋️', '📚', '🔨', '📝', '🧹', '🚚', '🧵', '⚡', '💊', '🥐', '🍗', '🧸', '💡', '🎸', '⚽', '🔑', '🪴', '👗', '🦷'].map((emoji) => (
+                    <button
+                      type="button"
+                      key={emoji}
+                      onClick={() => setCategoryForm(prev => ({ ...prev, icon: emoji }))}
+                      style={{
+                        width: '34px',
+                        height: '34px',
+                        borderRadius: '8px',
+                        border: categoryForm.icon === emoji ? '2px solid var(--primary)' : '1px solid var(--border)',
+                        background: categoryForm.icon === emoji ? 'rgba(34, 197, 94, 0.2)' : 'var(--bg-surface)',
+                        fontSize: '1.1rem',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      {emoji}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Quick Color Palette Presets */}
+              <div style={{ marginBottom: '16px' }}>
+                <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '6px', fontWeight: 600 }}>
+                  Preset Color Themes:
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                  {[
+                    { name: 'Emerald', color: '#10b981' },
+                    { name: 'Red', color: '#ef4444' },
+                    { name: 'Orange', color: '#f97316' },
+                    { name: 'Amber', color: '#f59e0b' },
+                    { name: 'Blue', color: '#3b82f6' },
+                    { name: 'Indigo', color: '#6366f1' },
+                    { name: 'Purple', color: '#a855f7' },
+                    { name: 'Pink', color: '#ec4899' },
+                    { name: 'Teal', color: '#14b8a6' },
+                    { name: 'Slate', color: '#64748b' }
+                  ].map((p) => (
+                    <button
+                      type="button"
+                      key={p.color}
+                      onClick={() => setCategoryForm(prev => ({ ...prev, color: p.color }))}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        padding: '4px 10px',
+                        borderRadius: '8px',
+                        border: categoryForm.color?.toLowerCase() === p.color.toLowerCase() ? `2px solid ${p.color}` : '1px solid var(--border)',
+                        background: categoryForm.color?.toLowerCase() === p.color.toLowerCase() ? `${p.color}22` : 'var(--bg-surface)',
+                        color: 'var(--text-main)',
+                        fontSize: '0.78rem',
+                        fontWeight: 600,
+                        cursor: 'pointer'
+                      }}
+                    >
+                      <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: p.color }} />
+                      <span>{p.name}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Short Description */}
+              <div className="form-group" style={{ marginBottom: '16px' }}>
+                <label className="form-label">Short Description</label>
+                <textarea
+                  className="form-textarea"
+                  rows={2}
+                  placeholder="e.g. Veterinary clinics, pet grooming salons, cat & dog food supplies, and animal daycare"
+                  value={categoryForm.description}
+                  onChange={(e) => setCategoryForm(prev => ({ ...prev, description: e.target.value }))}
+                />
+              </div>
+
+              {/* Sub-Categories (Specialities) */}
+              <div className="form-group" style={{ marginBottom: '16px' }}>
+                <label className="form-label">Sub-Categories / Specialities</label>
+                <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
+                  <input
+                    type="text"
+                    className="form-input"
+                    placeholder="Type sub-category and press Enter or click Add (e.g. Pet Clinic, Grooming)..."
+                    value={subCatInput}
+                    onChange={(e) => setSubCatInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleAddSubCategory();
+                      }
+                    }}
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={handleAddSubCategory}
+                    style={{ whiteSpace: 'nowrap' }}
+                  >
+                    + Add
+                  </button>
+                </div>
+
+                {categoryForm.subCategories.length > 0 ? (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                    {categoryForm.subCategories.map((sub, idx) => (
+                      <span
+                        key={idx}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          padding: '4px 10px',
+                          borderRadius: '8px',
+                          background: 'var(--bg-surface)',
+                          border: '1px solid var(--border)',
+                          fontSize: '0.82rem',
+                          color: 'var(--text-heading)'
+                        }}
+                      >
+                        <span>{sub}</span>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveSubCategory(idx)}
+                          style={{ color: '#ef4444', background: 'transparent', border: 'none', cursor: 'pointer', padding: 0, fontSize: '0.9rem', lineHeight: 1 }}
+                        >
+                          ✕
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                    No sub-categories added yet. Vendors in this category will select from these options during registration.
+                  </div>
+                )}
+              </div>
+
+              {/* Suggested Search Tags */}
+              <div className="form-group" style={{ marginBottom: '20px' }}>
+                <label className="form-label">Suggested Search Keywords / Tags</label>
+                <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
+                  <input
+                    type="text"
+                    className="form-input"
+                    placeholder="Type keyword and press Enter (e.g. Dog Food, Vaccination, Vet)..."
+                    value={tagInput}
+                    onChange={(e) => setTagInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleAddSuggestedTag();
+                      }
+                    }}
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={handleAddSuggestedTag}
+                    style={{ whiteSpace: 'nowrap' }}
+                  >
+                    + Add Tag
+                  </button>
+                </div>
+
+                {categoryForm.suggestedTags.length > 0 ? (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                    {categoryForm.suggestedTags.map((tag, idx) => (
+                      <span
+                        key={idx}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          padding: '4px 10px',
+                          borderRadius: '8px',
+                          background: 'rgba(34, 197, 94, 0.1)',
+                          border: '1px solid rgba(34, 197, 94, 0.25)',
+                          fontSize: '0.82rem',
+                          color: '#4ade80'
+                        }}
+                      >
+                        <span>#{tag}</span>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveSuggestedTag(idx)}
+                          style={{ color: '#ef4444', background: 'transparent', border: 'none', cursor: 'pointer', padding: 0, fontSize: '0.9rem', lineHeight: 1 }}
+                        >
+                          ✕
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                    No search tags added yet. These help residents find shops via search.
+                  </div>
+                )}
+              </div>
+
+              {/* Status active checkbox */}
+              <div style={{ marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <input
+                  type="checkbox"
+                  id="cat-is-active"
+                  checked={categoryForm.isActive}
+                  onChange={(e) => setCategoryForm(prev => ({ ...prev, isActive: e.target.checked }))}
+                  style={{ width: '18px', height: '18px', cursor: 'pointer' }}
+                />
+                <label htmlFor="cat-is-active" style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--text-heading)', cursor: 'pointer' }}>
+                  Active & Visible in Explore & Homepage
+                </label>
+              </div>
+
+              {/* Live Preview Box */}
+              <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: '12px', padding: '16px', marginBottom: '24px' }}>
+                <div style={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-light)', fontWeight: 800, marginBottom: '10px' }}>
+                  Live Preview Widget
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap' }}>
+                  {/* Explore Pill Preview */}
+                  <div style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    padding: '8px 16px',
+                    borderRadius: '9999px',
+                    fontSize: '0.85rem',
+                    fontWeight: 600,
+                    border: '1px solid var(--border)',
+                    background: 'var(--bg-card)',
+                    color: 'var(--text-main)'
+                  }}>
+                    <span>{categoryForm.icon || '🏷️'}</span>
+                    <span>{categoryForm.name || 'New Category'}</span>
+                  </div>
+
+                  {/* Home Grid Card Preview */}
+                  <div style={{
+                    background: 'var(--bg-card)',
+                    border: '1px solid var(--border)',
+                    borderRadius: '12px',
+                    padding: '12px 18px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    gap: '6px'
+                  }}>
+                    <div style={{ fontSize: '1.5rem' }}>{categoryForm.icon || '🏷️'}</div>
+                    <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-heading)' }}>
+                      {(categoryForm.name || 'New Category').split('&')[0]}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Modal Buttons */}
+              <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setIsCategoryModalOpen(false)}
+                  disabled={categorySubmitting}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  disabled={categorySubmitting}
+                  style={{ minWidth: '140px' }}
+                >
+                  {categorySubmitting ? 'Saving...' : (categoryModalMode === 'add' ? 'Create Category' : 'Save Changes')}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ====================================================
+          MODAL 2: DELETE CATEGORY CONFIRMATION
+          ==================================================== */}
+      {deletingCategory && (
+        <div className="modal-overlay" onClick={() => !isDeletingCategory && setDeletingCategory(null)}>
+          <div className="modal-card" style={{ maxWidth: '440px' }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ textAlign: 'center', marginBottom: '20px' }}>
+              <div style={{ width: '56px', height: '56px', borderRadius: '50%', background: 'rgba(239, 68, 68, 0.15)', color: '#ef4444', fontSize: '1.8rem', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' }}>
+                🗑️
+              </div>
+              <h3 style={{ fontSize: '1.3rem', fontWeight: 800, color: 'var(--text-heading)', marginBottom: '8px' }}>
+                Delete "{deletingCategory.name}"?
+              </h3>
+              <p style={{ fontSize: '0.88rem', color: 'var(--text-muted)', lineHeight: 1.5 }}>
+                Are you sure you want to delete this category? Any shops or requirements under this category will be safely reassigned to <strong>"Other Local Services"</strong> so no store records are lost.
+              </p>
+            </div>
+
+            <div style={{ display: 'flex', gap: '12px' }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                style={{ flex: 1 }}
+                onClick={() => setDeletingCategory(null)}
+                disabled={isDeletingCategory}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                style={{ flex: 1, background: '#e11d48' }}
+                onClick={handleConfirmDeleteCategory}
+                disabled={isDeletingCategory}
+              >
+                {isDeletingCategory ? 'Deleting...' : 'Confirm Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+
 

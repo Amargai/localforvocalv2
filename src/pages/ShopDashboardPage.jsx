@@ -1,14 +1,24 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { api } from '../utils/api';
 import { useAuth } from '../context/AuthContext';
+import { useCategories } from '../context/CategoryContext';
 import { RequirementCard } from '../components/RequirementCard';
 import { StarIcon, LocationIcon, ClockIcon, SparklesIcon, PlusIcon, PhoneIcon, WhatsappIcon, XIcon, CheckIcon } from '../components/Icons';
+import { reverseGeocode, setUserSavedLocation, getCurrentBrowserPosition } from '../utils/geo';
+import { compressImage } from '../utils/image';
+import { playLeadChime } from '../utils/audio';
+import { CounterQrModal } from '../components/CounterQrModal';
+import { cleanPhone, isValidPhone, cleanPin, isValidPin, cleanPositiveNumber } from '../utils/validation';
 
 export function ShopDashboardPage({ setActivePage }) {
   const { user, shop, refreshSession } = useAuth();
+  const { rawCategories, subCategoriesMap } = useCategories();
 
   // Tab State
   const [activeTab, setActiveTab] = useState('products'); // 'products', 'leads', 'offers', 'profile'
+  const [showQrModal, setShowQrModal] = useState(false);
+  const [leadNotification, setLeadNotification] = useState(null);
+  const prevLeadsCountRef = useRef(null);
 
   // Open / Close status
   const [isAvailable, setIsAvailable] = useState(shop?.availableToday ?? true);
@@ -44,15 +54,17 @@ export function ShopDashboardPage({ setActivePage }) {
 
   async function loadDashboardData() {
     try {
+      const shopQuery = shop?.id ? `?shopId=${encodeURIComponent(shop.id)}` : '';
       const [prodsRes, reqsRes, offersRes] = await Promise.all([
-        api('/products/mine'),
-        api('/requirements/matching'),
+        api(`/products/mine${shopQuery}`),
+        api(`/requirements/matching${shopQuery}`),
         api('/offers')
       ]);
 
       setProducts(prodsRes.products || []);
       setUsage(prodsRes.usage || { count: 0, limit: 5, isPro: false, remaining: 5 });
       setMatchingReqs(reqsRes.requirements || []);
+      prevLeadsCountRef.current = (reqsRes.requirements || []).length;
       setMyOffers((offersRes.offers || []).filter(o => o.shopId === shop?.id));
     } catch (err) {
       console.error(err);
@@ -61,6 +73,33 @@ export function ShopDashboardPage({ setActivePage }) {
       setLoadingLeads(false);
     }
   }
+
+  // Real-time Background Polling for Neighborhood Customer Leads
+  useEffect(() => {
+    if (!shop?.id) return;
+
+    const pollInterval = setInterval(async () => {
+      try {
+        const shopQuery = `?shopId=${encodeURIComponent(shop.id)}`;
+        const reqsRes = await api(`/requirements/matching${shopQuery}`);
+        const currentReqs = reqsRes.requirements || [];
+
+        if (prevLeadsCountRef.current !== null && currentReqs.length > prevLeadsCountRef.current) {
+          const diff = currentReqs.length - prevLeadsCountRef.current;
+          playLeadChime();
+          setLeadNotification(`🔔 ${diff} New Customer Lead${diff > 1 ? 's' : ''} Received in your Area!`);
+          setTimeout(() => setLeadNotification(null), 9000);
+        }
+
+        prevLeadsCountRef.current = currentReqs.length;
+        setMatchingReqs(currentReqs);
+      } catch (err) {
+        // Silent background catch
+      }
+    }, 20000);
+
+    return () => clearInterval(pollInterval);
+  }, [shop?.id]);
 
   async function handleToggleAvailability() {
     if (!shop) return;
@@ -82,7 +121,24 @@ export function ShopDashboardPage({ setActivePage }) {
 
   async function handleAddProduct(e) {
     e.preventDefault();
-    if (!prodName.trim() || !prodPrice) return;
+    if (!prodName.trim() || prodName.trim().length < 2) {
+      alert('Please enter a valid product name (minimum 2 characters)');
+      return;
+    }
+
+    const priceNum = parseFloat(prodPrice);
+    if (isNaN(priceNum) || priceNum <= 0) {
+      alert('Please enter a valid price greater than 0');
+      return;
+    }
+
+    if (prodOriginalPrice) {
+      const origNum = parseFloat(prodOriginalPrice);
+      if (!isNaN(origNum) && origNum < priceNum) {
+        alert('Original price must be greater than or equal to selling price');
+        return;
+      }
+    }
 
     if (!usage.isPro && usage.count >= usage.limit) {
       setShowAddProdModal(false);
@@ -96,8 +152,8 @@ export function ShopDashboardPage({ setActivePage }) {
         method: 'POST',
         body: JSON.stringify({
           name: prodName.trim(),
-          price: Number(prodPrice),
-          originalPrice: prodOriginalPrice ? Number(prodOriginalPrice) : undefined,
+          price: priceNum,
+          originalPrice: prodOriginalPrice ? parseFloat(prodOriginalPrice) : undefined,
           category: prodCategory.trim() || undefined,
           description: prodDesc.trim() || undefined,
           imageUrl: prodImage.trim() || undefined,
@@ -157,8 +213,9 @@ export function ShopDashboardPage({ setActivePage }) {
       if (target === 'product') setUploadingProdImg(true);
       else setUploadingProfileImg(true);
 
+      const optimizedFile = await compressImage(file);
       const formData = new FormData();
-      formData.append('image', file);
+      formData.append('image', optimizedFile);
 
       const res = await api('/uploads', {
         method: 'POST',
@@ -190,6 +247,9 @@ export function ShopDashboardPage({ setActivePage }) {
   const [editArea, setEditArea] = useState(shop?.area || '');
   const [editCity, setEditCity] = useState(shop?.city || '');
   const [editPin, setEditPin] = useState(shop?.pin || '');
+  const [editLat, setEditLat] = useState(shop?.latitude || 19.1136);
+  const [editLng, setEditLng] = useState(shop?.longitude || 72.8697);
+  const [detectingGps, setDetectingGps] = useState(false);
   const [editTags, setEditTags] = useState((shop?.tags || []).join(', '));
   const [editImage, setEditImage] = useState(shop?.images?.[0] || '');
   const [savingProfile, setSavingProfile] = useState(false);
@@ -206,19 +266,61 @@ export function ShopDashboardPage({ setActivePage }) {
     setEditArea(shop?.area || '');
     setEditCity(shop?.city || '');
     setEditPin(shop?.pin || '');
+    setEditLat(shop?.latitude || 19.1136);
+    setEditLng(shop?.longitude || 72.8697);
     setEditTags((shop?.tags || []).join(', '));
     setEditImage(shop?.images?.[0] || '');
     setIsEditingProfile(true);
     setProfileSuccessMsg('');
   }
 
+  async function handleDetectProfileGPS() {
+    try {
+      setDetectingGps(true);
+      const pos = await getCurrentBrowserPosition();
+      const newLat = Number(pos.lat);
+      const newLng = Number(pos.lng);
+      setEditLat(newLat);
+      setEditLng(newLng);
+      const geo = await reverseGeocode(newLat, newLng);
+      if (geo) {
+        if (geo.area) setEditArea(geo.area);
+        if (geo.city) setEditCity(geo.city);
+        if (geo.pin) setEditPin(geo.pin);
+      }
+    } catch (err) {
+      alert('Could not retrieve GPS coordinates. Please allow location permissions.');
+    } finally {
+      setDetectingGps(false);
+    }
+  }
+
   async function handleSaveProfile(e) {
     e.preventDefault();
     if (!shop?.id) return;
+
+    const cleanShopPhone = cleanPhone(editPhone);
+    if (!isValidPhone(cleanShopPhone)) {
+      alert('Please enter a valid 10-digit calling phone number starting with 6, 7, 8, or 9');
+      return;
+    }
+    const cleanWaPhone = editWhatsapp ? cleanPhone(editWhatsapp) : cleanShopPhone;
+    if (editWhatsapp && !isValidPhone(cleanWaPhone)) {
+      alert('Please enter a valid 10-digit WhatsApp number starting with 6, 7, 8, or 9');
+      return;
+    }
+    const cleanShopPin = editPin ? cleanPin(editPin) : '';
+    if (editPin && !isValidPin(cleanShopPin)) {
+      alert('Please enter a valid 6-digit postal PIN code');
+      return;
+    }
+
     try {
       setSavingProfile(true);
       const parsedTags = editTags.split(',').map(t => t.trim().toLowerCase()).filter(Boolean);
       const parsedImages = editImage.trim() ? [editImage.trim()] : (shop?.images || []);
+      const cleanLat = Number(editLat) || Number(shop?.latitude) || 19.1136;
+      const cleanLng = Number(editLng) || Number(shop?.longitude) || 72.8697;
 
       await api(`/shops/${shop.id}`, {
         method: 'PUT',
@@ -227,15 +329,25 @@ export function ShopDashboardPage({ setActivePage }) {
           ownerName: editOwnerName.trim(),
           category: editCategory,
           subCategory: editSubCategory.trim() || undefined,
-          phone: editPhone.trim(),
-          whatsapp: editWhatsapp.trim() || editPhone.trim(),
+          phone: cleanShopPhone,
+          whatsapp: cleanWaPhone,
           address: editAddress.trim(),
           area: editArea.trim(),
           city: editCity.trim(),
-          pin: editPin.trim() || undefined,
+          pin: cleanShopPin || undefined,
+          latitude: cleanLat,
+          longitude: cleanLng,
           tags: parsedTags,
           images: parsedImages
         })
+      });
+
+      setUserSavedLocation({
+        lat: cleanLat,
+        lng: cleanLng,
+        area: editArea.trim() || 'Current Location',
+        city: editCity.trim() || 'Near You',
+        pin: editPin.trim() || ''
       });
 
       await refreshSession();
@@ -298,10 +410,19 @@ export function ShopDashboardPage({ setActivePage }) {
           overflow: 'hidden'
         }}>
           <div style={{ position: 'relative', zIndex: 1 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px', flexWrap: 'wrap' }}>
               <span className="badge" style={{ background: 'rgba(34, 197, 94, 0.2)', color: '#4ade80', border: '1px solid rgba(74, 222, 128, 0.3)' }}>
                 {shop?.category?.toUpperCase() || 'LOCAL BUSINESS'}
               </span>
+              {shop?.status === 'pending' && (
+                <span className="badge badge-amber">⏳ PENDING APPROVAL</span>
+              )}
+              {shop?.status === 'rejected' && (
+                <span className="badge badge-red">✕ SUSPENDED</span>
+              )}
+              {shop?.status === 'active' && (
+                <span className="badge badge-green">✓ VERIFIED LIVE</span>
+              )}
               {shop?.featured ? (
                 <span className="badge badge-amber">★ PRO PARTNER</span>
               ) : (
@@ -318,37 +439,154 @@ export function ShopDashboardPage({ setActivePage }) {
             </div>
           </div>
 
-          {/* STORE STATUS TOGGLE */}
-          <div style={{
-            background: isAvailable ? 'rgba(22, 163, 74, 0.15)' : 'rgba(239, 68, 68, 0.15)',
-            border: isAvailable ? '1px solid rgba(74, 222, 128, 0.3)' : '1px solid rgba(248, 113, 113, 0.3)',
-            borderRadius: 'var(--radius-lg)',
-            padding: '16px 20px',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '16px',
-            zIndex: 1
-          }}>
-            <div>
-              <div style={{ fontWeight: 800, fontSize: '0.95rem', color: isAvailable ? '#86efac' : '#fca5a5', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <span style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', background: isAvailable ? '#22c55e' : '#ef4444' }} />
-                {isAvailable ? 'OPEN FOR ORDERS' : 'STORE CLOSED'}
-              </div>
-              <div style={{ fontSize: '0.75rem', color: '#94a3b8', marginTop: '2px' }}>
-                {isAvailable ? 'Visible in Open Today filters' : 'Temporarily hidden from search'}
-              </div>
-            </div>
-
+          {/* HEADER ACTION CONTROLS */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap', zIndex: 1 }}>
             <button
-              onClick={handleToggleAvailability}
-              disabled={toggling}
-              className={`btn ${isAvailable ? 'btn-secondary' : 'btn-primary'}`}
-              style={{ padding: '6px 14px', fontSize: '0.82rem', borderRadius: '8px' }}
+              type="button"
+              onClick={() => setShowQrModal(true)}
+              className="btn btn-secondary"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '8px',
+                padding: '12px 18px',
+                borderRadius: 'var(--radius-lg)',
+                fontWeight: 700,
+                fontSize: '0.88rem',
+                border: '1px solid rgba(255, 255, 255, 0.2)',
+                background: 'rgba(255, 255, 255, 0.08)'
+              }}
+              title="Print billing counter standee card with QR code"
             >
-              {toggling ? '...' : isAvailable ? 'Close Shop' : 'Open Shop'}
+              <span style={{ fontSize: '1.15rem' }}>🖨️</span>
+              <span>Counter QR Standee</span>
             </button>
+
+            {/* STORE STATUS TOGGLE */}
+            <div style={{
+              background: isAvailable ? 'rgba(22, 163, 74, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+              border: isAvailable ? '1px solid rgba(74, 222, 128, 0.3)' : '1px solid rgba(248, 113, 113, 0.3)',
+              borderRadius: 'var(--radius-lg)',
+              padding: '16px 20px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '16px'
+            }}>
+              <div>
+                <div style={{ fontWeight: 800, fontSize: '0.95rem', color: isAvailable ? '#86efac' : '#fca5a5', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <span style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', background: isAvailable ? '#22c55e' : '#ef4444' }} />
+                  {isAvailable ? 'OPEN FOR ORDERS' : 'STORE CLOSED'}
+                </div>
+                <div style={{ fontSize: '0.75rem', color: '#94a3b8', marginTop: '2px' }}>
+                  {isAvailable ? 'Visible in Open Today filters' : 'Temporarily hidden from search'}
+                </div>
+              </div>
+
+              <button
+                onClick={handleToggleAvailability}
+                disabled={toggling}
+                className={`btn ${isAvailable ? 'btn-secondary' : 'btn-primary'}`}
+                style={{ padding: '6px 14px', fontSize: '0.82rem', borderRadius: '8px' }}
+              >
+                {toggling ? '...' : isAvailable ? 'Close Shop' : 'Open Shop'}
+              </button>
+            </div>
           </div>
         </div>
+
+        {/* REAL-TIME LEAD ARRIVAL NOTIFICATION BANNER */}
+        {leadNotification && (
+          <div style={{
+            background: 'linear-gradient(135deg, #15803d 0%, #166534 100%)',
+            border: '2px solid #4ade80',
+            color: '#ffffff',
+            borderRadius: 'var(--radius-lg)',
+            padding: '14px 20px',
+            marginBottom: '24px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            boxShadow: '0 8px 24px rgba(34, 197, 94, 0.35)',
+            gap: '16px'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', fontWeight: 800, fontSize: '0.98rem' }}>
+              <span style={{ fontSize: '1.4rem' }}>🚨</span>
+              <span>{leadNotification}</span>
+            </div>
+            <button
+              className="btn btn-primary"
+              onClick={() => { setActiveTab('leads'); setLeadNotification(null); }}
+              style={{ padding: '8px 18px', fontSize: '0.82rem', background: '#ffffff', color: '#166534', fontWeight: 800 }}
+            >
+              Open Demand Radar →
+            </button>
+          </div>
+        )}
+
+        {/* PENDING APPROVAL BANNER */}
+        {shop?.status === 'pending' && (
+          <div style={{
+            background: 'linear-gradient(135deg, rgba(245, 158, 11, 0.15) 0%, rgba(217, 119, 6, 0.08) 100%)',
+            border: '1px solid rgba(245, 158, 11, 0.35)',
+            borderRadius: 'var(--radius-lg)',
+            padding: '16px 20px',
+            marginBottom: '28px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '16px',
+            boxShadow: 'var(--shadow-sm)'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+              <div style={{ width: '42px', height: '42px', borderRadius: '50%', background: '#d97706', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.3rem', flexShrink: 0 }}>
+                🕒
+              </div>
+              <div>
+                <div style={{ fontWeight: 800, fontSize: '1.02rem', color: '#fbbf24' }}>
+                  Shop Listing Under Admin Review
+                </div>
+                <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '2px', lineHeight: 1.4 }}>
+                  Your shop registration has been submitted and is awaiting administrator verification. It will become live on the public Explore directory once approved. You can add your products and customize your store in the meantime!
+                </div>
+              </div>
+            </div>
+            <span className="badge badge-amber" style={{ padding: '6px 14px', fontSize: '0.82rem', whiteSpace: 'nowrap', fontWeight: 700 }}>
+              ⏳ Pending Review
+            </span>
+          </div>
+        )}
+
+        {/* SUSPENDED / REJECTED BANNER */}
+        {shop?.status === 'rejected' && (
+          <div style={{
+            background: 'linear-gradient(135deg, rgba(239, 68, 68, 0.15) 0%, rgba(185, 28, 28, 0.08) 100%)',
+            border: '1px solid rgba(239, 68, 68, 0.35)',
+            borderRadius: 'var(--radius-lg)',
+            padding: '16px 20px',
+            marginBottom: '28px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '16px'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+              <div style={{ width: '42px', height: '42px', borderRadius: '50%', background: '#dc2626', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.3rem', flexShrink: 0 }}>
+                ⚠️
+              </div>
+              <div>
+                <div style={{ fontWeight: 800, fontSize: '1.02rem', color: '#f87171' }}>
+                  Listing Suspended or Rejected
+                </div>
+                <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '2px' }}>
+                  This shop listing is currently not active on public search. Please review your store details or contact platform support.
+                </div>
+              </div>
+            </div>
+            <span className="badge badge-red" style={{ padding: '6px 14px', fontSize: '0.82rem', whiteSpace: 'nowrap', fontWeight: 700 }}>
+              ✕ Suspended
+            </span>
+          </div>
+        )}
 
         {/* METRICS ROW */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', marginBottom: '32px' }}>
@@ -634,7 +872,12 @@ export function ShopDashboardPage({ setActivePage }) {
             ) : (
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: '20px' }}>
                 {matchingReqs.map((req) => (
-                  <RequirementCard key={req.id} requirement={req} onRefresh={loadDashboardData} />
+                  <RequirementCard
+                    key={req.id}
+                    requirement={req}
+                    onRefresh={loadDashboardData}
+                    setActivePage={setActivePage}
+                  />
                 ))}
               </div>
             )}
@@ -742,14 +985,11 @@ export function ShopDashboardPage({ setActivePage }) {
                       onChange={(e) => setEditCategory(e.target.value)}
                       required
                     >
-                      <option value="medical">Medical & Chemist</option>
-                      <option value="grocery">Grocery & Daily Needs</option>
-                      <option value="bakery">Bakery & Sweets</option>
-                      <option value="carpenter">Carpentry & Furniture</option>
-                      <option value="electronics">Electronics & Mobile Repair</option>
-                      <option value="plumbing">Plumbing & Hardware</option>
-                      <option value="tailor">Tailoring & Boutique</option>
-                      <option value="services">Local Home Services</option>
+                      {rawCategories.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.icon} {c.name}
+                        </option>
+                      ))}
                     </select>
                   </div>
 
@@ -767,23 +1007,45 @@ export function ShopDashboardPage({ setActivePage }) {
 
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px' }}>
                   <div className="form-group">
-                    <label className="form-label">Calling Phone Number *</label>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                      <label className="form-label" style={{ margin: 0 }}>Calling Phone Number *</label>
+                      {editPhone.length > 0 && (
+                        <span style={{ fontSize: '0.72rem', fontWeight: 700, color: isValidPhone(editPhone) ? '#22c55e' : '#f59e0b' }}>
+                          {isValidPhone(editPhone) ? '✓ 10 digits' : `${editPhone.length}/10 digits`}
+                        </span>
+                      )}
+                    </div>
                     <input
                       type="tel"
                       className="form-input"
                       value={editPhone}
-                      onChange={(e) => setEditPhone(e.target.value)}
+                      onChange={(e) => setEditPhone(cleanPhone(e.target.value))}
+                      maxLength={10}
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      style={{ borderColor: editPhone.length === 10 ? (isValidPhone(editPhone) ? '#22c55e' : '#ef4444') : undefined }}
                       required
                     />
                   </div>
 
                   <div className="form-group">
-                    <label className="form-label">WhatsApp Number for Leads *</label>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                      <label className="form-label" style={{ margin: 0 }}>WhatsApp Number for Leads *</label>
+                      {editWhatsapp.length > 0 && (
+                        <span style={{ fontSize: '0.72rem', fontWeight: 700, color: isValidPhone(editWhatsapp) ? '#22c55e' : '#f59e0b' }}>
+                          {isValidPhone(editWhatsapp) ? '✓ 10 digits' : `${editWhatsapp.length}/10 digits`}
+                        </span>
+                      )}
+                    </div>
                     <input
                       type="tel"
                       className="form-input"
                       value={editWhatsapp}
-                      onChange={(e) => setEditWhatsapp(e.target.value)}
+                      onChange={(e) => setEditWhatsapp(cleanPhone(e.target.value))}
+                      maxLength={10}
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      style={{ borderColor: editWhatsapp.length === 10 ? (isValidPhone(editWhatsapp) ? '#22c55e' : '#ef4444') : undefined }}
                       required
                     />
                   </div>
@@ -824,13 +1086,65 @@ export function ShopDashboardPage({ setActivePage }) {
                   </div>
 
                   <div className="form-group">
-                    <label className="form-label">PIN Code</label>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                      <label className="form-label" style={{ margin: 0 }}>PIN Code</label>
+                      {editPin.length > 0 && (
+                        <span style={{ fontSize: '0.72rem', fontWeight: 700, color: isValidPin(editPin) ? '#22c55e' : '#f59e0b' }}>
+                          {isValidPin(editPin) ? '✓ 6 digits' : `${editPin.length}/6`}
+                        </span>
+                      )}
+                    </div>
                     <input
                       type="text"
                       className="form-input"
                       value={editPin}
-                      onChange={(e) => setEditPin(e.target.value)}
+                      onChange={(e) => setEditPin(cleanPin(e.target.value))}
+                      maxLength={6}
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      style={{ borderColor: editPin.length === 6 ? (isValidPin(editPin) ? '#22c55e' : '#ef4444') : undefined }}
                     />
+                  </div>
+                </div>
+
+                <div style={{ background: 'var(--bg-input)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', padding: '14px', marginBottom: '16px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                    <label className="form-label" style={{ margin: 0 }}>📍 GPS Location Coordinates (For Radius Search)</label>
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      style={{ padding: '4px 10px', fontSize: '0.76rem' }}
+                      onClick={handleDetectProfileGPS}
+                      disabled={detectingGps}
+                    >
+                      <LocationIcon size={13} /> {detectingGps ? 'Locating...' : 'Detect Live GPS'}
+                    </button>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                    <div>
+                      <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>Latitude</label>
+                      <input
+                        type="number"
+                        step="any"
+                        className="form-input"
+                        style={{ padding: '6px 10px', fontSize: '0.85rem' }}
+                        value={editLat}
+                        onChange={(e) => setEditLat(parseFloat(e.target.value) || 0)}
+                        placeholder="e.g. 17.3715"
+                      />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>Longitude</label>
+                      <input
+                        type="number"
+                        step="any"
+                        className="form-input"
+                        style={{ padding: '6px 10px', fontSize: '0.85rem' }}
+                        value={editLng}
+                        onChange={(e) => setEditLng(parseFloat(e.target.value) || 0)}
+                        placeholder="e.g. 73.9008"
+                      />
+                    </div>
                   </div>
                 </div>
 
@@ -1100,6 +1414,13 @@ export function ShopDashboardPage({ setActivePage }) {
             </div>
           </div>
         )}
+
+        {/* COUNTER QR STANDEE PRINT MODAL */}
+        <CounterQrModal
+          shop={shop}
+          isOpen={showQrModal}
+          onClose={() => setShowQrModal(false)}
+        />
 
       </div>
     </div>

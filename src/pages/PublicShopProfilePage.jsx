@@ -6,7 +6,7 @@ import {
   ClockIcon, ShieldCheckIcon, SparklesIcon, CheckIcon
 } from '../components/Icons';
 
-export function PublicShopProfilePage({ shopId, setActivePage, onBack }) {
+export function PublicShopProfilePage({ shopId, setActivePage, onBack, onPostRequirement }) {
   const { user, openAuthModal } = useAuth();
   const [shop, setShop] = useState(null);
   const [products, setProducts] = useState([]);
@@ -242,29 +242,50 @@ export function PublicShopProfilePage({ shopId, setActivePage, onBack }) {
                 </div>
               </div>
 
-              {/* Direct WhatsApp / Call Buttons */}
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px' }}>
-                {shop.whatsapp && (
+              {/* Action Buttons: Direct Post Requirement + WhatsApp + Call */}
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', alignItems: 'center' }}>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  style={{
+                    padding: '12px 22px',
+                    fontSize: '0.92rem',
+                    fontWeight: 800,
+                    borderRadius: '10px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    boxShadow: 'var(--shadow-sm)'
+                  }}
+                  onClick={() => onPostRequirement ? onPostRequirement(shop) : setActivePage('requirements')}
+                >
+                  <span>📋</span>
+                  <span>Request Item / Quote from {shop.name}</span>
+                </button>
+
+                {Boolean(shop.whatsapp && shop.whatsapp.replace(/\D/g, '')) && (
                   <a
                     href={`https://wa.me/91${shop.whatsapp.replace(/\D/g, '')}?text=${encodeURIComponent(`Hi ${shop.name}, I found your storefront on Local for Vocal and would like to place an order/inquire.`)}`}
                     target="_blank"
-                    rel="noreferrer"
+                    rel="noopener noreferrer"
                     className="btn btn-whatsapp"
-                    style={{ padding: '12px 20px', fontSize: '0.92rem', borderRadius: '10px' }}
+                    style={{ padding: '12px 18px', fontSize: '0.92rem', borderRadius: '10px' }}
                   >
                     <WhatsappIcon size={18} />
-                    Order on WhatsApp
+                    WhatsApp
                   </a>
                 )}
 
-                <a
-                  href={`tel:${shop.phone}`}
-                  className="btn btn-primary"
-                  style={{ padding: '12px 20px', fontSize: '0.92rem', borderRadius: '10px' }}
-                >
-                  <PhoneIcon size={18} />
-                  Call {shop.phone}
-                </a>
+                {Boolean(shop.phone && shop.phone.replace(/\D/g, '')) && (
+                  <a
+                    href={`tel:${shop.phone.replace(/\D/g, '')}`}
+                    className="btn btn-secondary"
+                    style={{ padding: '12px 18px', fontSize: '0.92rem', borderRadius: '10px' }}
+                  >
+                    <PhoneIcon size={18} />
+                    Call {shop.phone}
+                  </a>
+                )}
               </div>
             </div>
 
@@ -588,15 +609,18 @@ export function PublicShopProfilePage({ shopId, setActivePage, onBack }) {
             </div>
 
             {/* Reverse Marketplace Callout */}
-            <div style={{ background: 'rgba(34, 197, 94, 0.08)', border: '1px solid rgba(34, 197, 94, 0.25)', borderRadius: 'var(--radius-lg)', padding: '20px', marginTop: '28px' }}>
-              <div style={{ fontWeight: 800, color: '#4ade80', fontSize: '1rem', marginBottom: '4px' }}>
-                Looking for something specific that's out of stock?
+            <div style={{ background: 'rgba(34, 197, 94, 0.08)', border: '1px solid rgba(34, 197, 94, 0.25)', borderRadius: 'var(--radius-lg)', padding: '22px', marginTop: '28px' }}>
+              <div style={{ fontWeight: 800, color: '#4ade80', fontSize: '1.05rem', marginBottom: '4px' }}>
+                Looking for something specific or custom quote?
               </div>
-              <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', marginBottom: '14px' }}>
-                Broadcast a requirement to {shop.name} and all other {shop.category} stores in your neighborhood.
+              <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', marginBottom: '14px', lineHeight: 1.5 }}>
+                Post a requirement directly to <strong>{shop.name}</strong> or broadcast it across all neighborhood {shop.category} stores.
               </p>
-              <button className="btn btn-primary" onClick={() => setActivePage('requirements')}>
-                Post Neighborhood Requirement
+              <button
+                className="btn btn-primary"
+                onClick={() => onPostRequirement ? onPostRequirement(shop) : setActivePage('requirements')}
+              >
+                📋 Post Requirement to {shop.name}
               </button>
             </div>
           </div>

@@ -102,11 +102,11 @@ export function ShopCard({ shop, onSelect }) {
           </div>
 
           <div style={{ display: 'flex', gap: '8px' }}>
-            {shop.whatsapp && (
+            {Boolean(shop.whatsapp && shop.whatsapp.replace(/\D/g, '')) && (
               <a
-                href={`https://wa.me/91${shop.whatsapp.replace(/\D/g, '')}?text=${encodeURIComponent(`Hi ${shop.name}, I found your shop on Local for Vocal.`)}`}
+                href={`https://wa.me/91${shop.whatsapp.replace(/\D/g, '')}?text=${encodeURIComponent(`Hi ${shop.name || 'there'}, I found your shop on Local for Vocal.`)}`}
                 target="_blank"
-                rel="noreferrer"
+                rel="noopener noreferrer"
                 className="btn btn-whatsapp"
                 style={{ padding: '6px 12px', fontSize: '0.8rem', borderRadius: '6px' }}
                 title="Chat on WhatsApp"
@@ -116,14 +116,16 @@ export function ShopCard({ shop, onSelect }) {
               </a>
             )}
 
-            <a
-              href={`tel:${shop.phone}`}
-              className="btn btn-secondary"
-              style={{ padding: '6px 10px', fontSize: '0.8rem', borderRadius: '6px' }}
-              title="Call Shop"
-            >
-              <PhoneIcon className="w-4 h-4" />
-            </a>
+            {Boolean(shop.phone && shop.phone.replace(/\D/g, '')) && (
+              <a
+                href={`tel:${shop.phone.replace(/\D/g, '')}`}
+                className="btn btn-secondary"
+                style={{ padding: '6px 10px', fontSize: '0.8rem', borderRadius: '6px' }}
+                title={`Call ${shop.phone}`}
+              >
+                <PhoneIcon className="w-4 h-4" />
+              </a>
+            )}
           </div>
         </div>
       </div>

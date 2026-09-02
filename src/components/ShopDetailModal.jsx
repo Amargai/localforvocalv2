@@ -3,7 +3,7 @@ import { api } from '../utils/api';
 import { useAuth } from '../context/AuthContext';
 import { XIcon, StarIcon, LocationIcon, WhatsappIcon, PhoneIcon, ClockIcon } from './Icons';
 
-export function ShopDetailModal({ shopId, onClose, onReviewAdded }) {
+export function ShopDetailModal({ shopId, onClose, onReviewAdded, onPostRequirement }) {
   const { user, openAuthModal } = useAuth();
   const [shop, setShop] = useState(null);
   const [reviews, setReviews] = useState([]);
@@ -36,7 +36,6 @@ export function ShopDetailModal({ shopId, onClose, onReviewAdded }) {
       setLoading(false);
     }
   }
-
 
   async function handleSubmitReview(e) {
     e.preventDefault();
@@ -100,7 +99,7 @@ export function ShopDetailModal({ shopId, onClose, onReviewAdded }) {
             </div>
 
             {/* Timings & Owner Info */}
-            <div style={{ background: '#f8fafc', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', padding: '16px', marginBottom: '20px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+            <div style={{ background: 'var(--bg-input)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', padding: '16px', marginBottom: '20px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
               <div>
                 <div style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: 700, marginBottom: '4px' }}>
                   Owner / Contact Person
@@ -120,29 +119,61 @@ export function ShopDetailModal({ shopId, onClose, onReviewAdded }) {
               </div>
             </div>
 
-            {/* Action Buttons */}
-            <div style={{ display: 'flex', gap: '12px', marginBottom: '24px' }}>
-              {shop.whatsapp && (
-                <a
-                  href={`https://wa.me/91${shop.whatsapp.replace(/\D/g, '')}?text=${encodeURIComponent(`Hi ${shop.name}, I found your listing on Local for Vocal.`)}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="btn btn-whatsapp"
-                  style={{ flex: 1, padding: '12px' }}
-                >
-                  <WhatsappIcon className="w-5 h-5" />
-                  Chat on WhatsApp
-                </a>
-              )}
-
-              <a
-                href={`tel:${shop.phone}`}
+            {/* ACTION BUTTONS (Prominent Post Requirement + WhatsApp + Call) */}
+            <div style={{ marginBottom: '24px' }}>
+              {/* PRIMARY PROMINENT POST REQUIREMENT BUTTON */}
+              <button
+                type="button"
                 className="btn btn-primary"
-                style={{ flex: 1, padding: '12px' }}
+                style={{
+                  width: '100%',
+                  padding: '13px 20px',
+                  fontSize: '0.96rem',
+                  fontWeight: 800,
+                  borderRadius: 'var(--radius-md)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '8px',
+                  marginBottom: '10px',
+                  boxShadow: 'var(--shadow-sm)'
+                }}
+                onClick={() => {
+                  if (onPostRequirement) {
+                    onClose();
+                    onPostRequirement(shop);
+                  }
+                }}
               >
-                <PhoneIcon className="w-5 h-5" />
-                Call {shop.phone}
-              </a>
+                <span>📋</span>
+                <span>Request Item / Quote from {shop.name}</span>
+              </button>
+
+              <div style={{ display: 'flex', gap: '10px' }}>
+                {Boolean(shop.whatsapp && shop.whatsapp.replace(/\D/g, '')) && (
+                  <a
+                    href={`https://wa.me/91${shop.whatsapp.replace(/\D/g, '')}?text=${encodeURIComponent(`Hi ${shop.name || 'there'}, I found your listing on Local for Vocal.`)}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="btn btn-whatsapp"
+                    style={{ flex: 1, padding: '10px 14px', fontSize: '0.88rem' }}
+                  >
+                    <WhatsappIcon className="w-4 h-4" />
+                    Chat on WhatsApp
+                  </a>
+                )}
+
+                {Boolean(shop.phone && shop.phone.replace(/\D/g, '')) && (
+                  <a
+                    href={`tel:${shop.phone.replace(/\D/g, '')}`}
+                    className="btn btn-secondary"
+                    style={{ flex: 1, padding: '10px 14px', fontSize: '0.88rem' }}
+                  >
+                    <PhoneIcon className="w-4 h-4" />
+                    Call {shop.phone}
+                  </a>
+                )}
+              </div>
             </div>
 
             {/* Tags */}
@@ -194,11 +225,11 @@ export function ShopDetailModal({ shopId, onClose, onReviewAdded }) {
                           {p.originalPrice && <span style={{ fontSize: '0.75rem', color: 'var(--text-light)', textDecoration: 'line-through' }}>₹{p.originalPrice}</span>}
                         </div>
 
-                        {shop.whatsapp && (
+                        {Boolean(shop.whatsapp && shop.whatsapp.replace(/\D/g, '')) && (
                           <a
-                            href={`https://wa.me/91${shop.whatsapp.replace(/\D/g, '')}?text=${encodeURIComponent(`Hi ${shop.name}, I am interested in ordering/inquiring about "${p.name}" (₹${p.price}) seen on Local for Vocal.`)}`}
+                            href={`https://wa.me/91${shop.whatsapp.replace(/\D/g, '')}?text=${encodeURIComponent(`Hi ${shop.name || 'there'}, I am interested in ordering/inquiring about "${p.name}" (₹${p.price}) seen on Local for Vocal.`)}`}
                             target="_blank"
-                            rel="noreferrer"
+                            rel="noopener noreferrer"
                             className="btn btn-whatsapp"
                             style={{ padding: '6px 8px', fontSize: '0.75rem', justifyContent: 'center' }}
                           >

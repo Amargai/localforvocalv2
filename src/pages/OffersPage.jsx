@@ -1,13 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../utils/api';
 import { useAuth } from '../context/AuthContext';
+import { useCategories } from '../context/CategoryContext';
 import { WhatsappIcon, PhoneIcon, LocationIcon, SparklesIcon, PlusIcon } from '../components/Icons';
 
-export function OffersPage({ onSelectShop }) {
+export function OffersPage({ onSelectShop, setActivePage }) {
   const { user } = useAuth();
+  const { rawCategories } = useCategories();
   const [offers, setOffers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showPostModal, setShowPostModal] = useState(false);
+  const [selectedCat, setSelectedCat] = useState('all');
+  const [searchQuery, setSearchQuery] = useState('');
 
   // Post offer form
   const [title, setTitle] = useState('');
@@ -31,6 +35,19 @@ export function OffersPage({ onSelectShop }) {
       setLoading(false);
     }
   }
+
+  const filteredOffers = offers.filter(offer => {
+    if (selectedCat !== 'all' && offer.category !== selectedCat) return false;
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      const matchTitle = offer.title?.toLowerCase().includes(q);
+      const matchDesc = offer.description?.toLowerCase().includes(q);
+      const matchShop = offer.shopName?.toLowerCase().includes(q);
+      const matchDiscount = offer.discount?.toLowerCase().includes(q);
+      if (!matchTitle && !matchDesc && !matchShop && !matchDiscount) return false;
+    }
+    return true;
+  });
 
   async function handlePostOffer(e) {
     e.preventDefault();
@@ -88,17 +105,98 @@ export function OffersPage({ onSelectShop }) {
           )}
         </div>
 
+        {/* Search & Category Filter Bar */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginBottom: '28px' }}>
+          {/* Search Box */}
+          <div style={{ position: 'relative' }}>
+            <input
+              type="text"
+              className="form-input"
+              style={{ paddingLeft: '40px', fontSize: '0.95rem' }}
+              placeholder="Search deals (e.g. 20% off, cakes, medicine, electronics)..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+            <span style={{ position: 'absolute', left: '14px', top: '50%', transform: 'translateY(-50%)', opacity: 0.5, fontSize: '1rem' }}>
+              🔍
+            </span>
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery('')}
+                style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
+              >
+                ✕
+              </button>
+            )}
+          </div>
+
+          {/* Category Pills */}
+          <div style={{ display: 'flex', gap: '8px', overflowX: 'auto', paddingBottom: '6px' }}>
+            <button
+              onClick={() => setSelectedCat('all')}
+              style={{
+                padding: '7px 14px',
+                borderRadius: '20px',
+                fontSize: '0.82rem',
+                fontWeight: 700,
+                border: `1px solid ${selectedCat === 'all' ? 'var(--primary)' : 'var(--border)'}`,
+                background: selectedCat === 'all' ? 'var(--primary)' : 'var(--bg-surface)',
+                color: selectedCat === 'all' ? '#080911' : 'var(--text-main)',
+                cursor: 'pointer',
+                whiteSpace: 'nowrap',
+                transition: 'all 0.2s'
+              }}
+            >
+              🏷️ All Deals ({offers.length})
+            </button>
+            {rawCategories.map((c) => {
+              const count = offers.filter(o => o.category === c.id).length;
+              if (count === 0 && selectedCat !== c.id) return null;
+              return (
+                <button
+                  key={c.id}
+                  onClick={() => setSelectedCat(c.id)}
+                  style={{
+                    padding: '7px 14px',
+                    borderRadius: '20px',
+                    fontSize: '0.82rem',
+                    fontWeight: 700,
+                    border: `1px solid ${selectedCat === c.id ? 'var(--primary)' : 'var(--border)'}`,
+                    background: selectedCat === c.id ? 'var(--primary)' : 'var(--bg-surface)',
+                    color: selectedCat === c.id ? '#080911' : 'var(--text-main)',
+                    cursor: 'pointer',
+                    whiteSpace: 'nowrap',
+                    transition: 'all 0.2s'
+                  }}
+                >
+                  {c.icon} {c.name} {count > 0 ? `(${count})` : ''}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
         {loading ? (
           <div style={{ textAlign: 'center', padding: '80px 0' }}>Finding active neighborhood offers...</div>
-        ) : offers.length === 0 ? (
+        ) : filteredOffers.length === 0 ? (
           <div style={{ background: 'var(--bg-card)', border: '1px dashed var(--border)', borderRadius: 'var(--radius-xl)', padding: '60px 20px', textAlign: 'center' }}>
             <div style={{ fontSize: '1.8rem', marginBottom: '8px' }}>🎁</div>
-            <h3 style={{ fontSize: '1.3rem', fontWeight: 700, marginBottom: '6px', color: 'var(--text-heading)' }}>No active flash deals right now</h3>
-            <p style={{ color: 'var(--text-muted)' }}>Check back soon or ask your local shopkeeper to post their promotions on Local for Vocal!</p>
+            <h3 style={{ fontSize: '1.3rem', fontWeight: 700, marginBottom: '6px', color: 'var(--text-heading)' }}>
+              {searchQuery || selectedCat !== 'all' ? 'No offers match your filter' : 'No active flash deals right now'}
+            </h3>
+            <p style={{ color: 'var(--text-muted)' }}>
+              {searchQuery || selectedCat !== 'all' ? (
+                <button className="btn btn-secondary" onClick={() => { setSearchQuery(''); setSelectedCat('all'); }} style={{ marginTop: '12px' }}>
+                  Clear Filters
+                </button>
+              ) : (
+                'Check back soon or ask your local shopkeeper to post their promotions on Local for Vocal!'
+              )}
+            </p>
           </div>
         ) : (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: '24px' }}>
-            {offers.map((offer) => (
+            {filteredOffers.map((offer) => (
               <div
                 key={offer.id}
                 style={{
