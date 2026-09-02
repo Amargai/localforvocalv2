@@ -72,12 +72,14 @@ async function sendRealSMS(phone, otpCode) {
   return { success: true, provider: 'local', simulated: true };
 }
 
-// Fast2SMS API integration
+// Fast2SMS API integration (Quick SMS route 'q' delivers immediately)
 function sendViaFast2SMS(apiKey, phone, otp) {
   return new Promise((resolve, reject) => {
     const postData = JSON.stringify({
-      route: 'otp',
-      variables_values: otp,
+      route: 'q',
+      message: `Your LocalForVocal verification code is ${otp}. Valid for 5 minutes. Do not share it with anyone.`,
+      language: 'english',
+      flash: 0,
       numbers: phone
     });
 
@@ -99,8 +101,11 @@ function sendViaFast2SMS(apiKey, phone, otp) {
       res.on('end', () => {
         try {
           const json = JSON.parse(raw);
-          if (json.return === true || res.statusCode === 200) resolve(json);
-          else reject(new Error(json.message || 'Fast2SMS delivery error'));
+          if (json.return === true || res.statusCode === 200) {
+            resolve(json);
+          } else {
+            reject(new Error(Array.isArray(json.message) ? json.message.join(', ') : (json.message || 'Fast2SMS delivery error')));
+          }
         } catch (e) {
           resolve(raw);
         }
